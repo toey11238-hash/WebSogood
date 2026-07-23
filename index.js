@@ -40,7 +40,7 @@ function checkHasPermission(userId) {
 }
 
 // ==========================================
-// 📁 2. ระบบ Config (พร้อมระบบซ่อมแซมตัวเอง)
+// 📁 2. ระบบ Config (พร้อม Auto-Repair ซ่อมไฟล์อัตโนมัติ)
 // ==========================================
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const DEFAULT_CONFIG = {
@@ -64,12 +64,12 @@ function loadConfig() {
       return { ...DEFAULT_CONFIG };
     }
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    if (!raw.trim()) throw new Error('File is empty'); 
+    if (!raw || !raw.trim()) throw new Error('File is completely empty'); 
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
-    console.error('⚠️ ไฟล์ config.json มีปัญหา สร้างใหม่ด้วยค่าเริ่มต้น...');
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    console.error('⚠️ ไฟล์ config.json เสียหาย ระบบกำลังซ่อมแซมและใช้ค่าเริ่มต้น...');
+    try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2)); } catch(err){}
     return { ...DEFAULT_CONFIG };
   }
 }
@@ -108,7 +108,7 @@ function getSystemPrompt() {
 }
 
 // ==========================================
-// 🧠 4. ระบบ API ฟรี และ Auto-Detect ค่าย
+// 🧠 4. ฟังก์ชันตรวจจับค่าย API ฟรีอัตโนมัติ
 // ==========================================
 function detectApiProvider(key) {
   const k = key.trim();
@@ -131,24 +131,28 @@ const FALLBACK_ANSWERS = [
   'ตอนนี้เซิร์ฟเวอร์ AI ฝั่งผมกำลังหน่วงๆ ขออภัยด้วยนะเจ้านาย 🥲',
 ];
 
+// ฟังก์ชันคัดกรองขยะแบบเข้มงวดที่สุด
 function isValidAiResponse(reply) {
+  if (!reply) return false;
   if (typeof reply !== 'string') return false;
   const text = reply.trim().toLowerCase();
-  if (!text) return false;
-  if (text.includes('<!doctype html') || text.includes('<html')) return false;
+  if (text.length === 0) return false;
+  if (text.includes('<!doctype html') || text.includes('<html') || text.includes('<body')) return false;
   if (text === 'timed out' || text.includes('time out') || text === 'timeout') return false;
   if (text.includes('rate limit') || text.includes('too many requests')) return false;
   if (text.includes('502 bad gateway') || text.includes('503 service unavailable') || text.includes('error 500')) return false;
   if (text.includes('{"error":') || text.includes('internal server error')) return false;
+  if (text.includes('cloudflare')) return false; 
   return true;
 }
 
 async function getAiResponse(text) {
   const systemPrompt = getSystemPrompt();
+  // ตัดข้อความกัน URL GET พัง (จำกัด 500 ตัวอักษรสำหรับ API สำรอง)
   const safeText = text.length > 500 ? text.slice(0, 500) + '...' : text;
   const fullPromptGET = `${systemPrompt}\n\nข้อความจากผู้ใช้: ${safeText}`;
 
-  // 1️⃣ Custom API
+  // 1️⃣ เรียกใช้ API Key ส่วนตัว (ตรวจค่ายให้อัตโนมัติ)
   if (cfg.customApiKey && cfg.customApiKey.trim() !== '') {
     const provider = detectApiProvider(cfg.customApiKey);
     try {
@@ -156,10 +160,12 @@ async function getAiResponse(text) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${provider.key}`
       };
+      
       const res = await axios.post(provider.url, {
         model: provider.model,
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }]
       }, { headers, timeout: 15000 });
+      
       const reply = res.data?.choices?.[0]?.message?.content;
       if (isValidAiResponse(reply)) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
     } catch (e) {
@@ -167,10 +173,13 @@ async function getAiResponse(text) {
     }
   }
 
-  // 2️⃣ Pollinations
+  // 2️⃣ API ฟรีหลัก (Pollinations POST)
   try {
     const res = await axios.post('https://text.pollinations.ai/', {
-      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text }
+      ],
       model: 'openai',
       seed: Math.floor(Math.random() * 1000000)
     }, {
@@ -180,16 +189,21 @@ async function getAiResponse(text) {
       },
       timeout: 15000
     });
+    
     let reply = res.data;
     if (typeof reply === 'object' && reply.content) reply = reply.content;
-    if (isValidAiResponse(reply)) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+    if (isValidAiResponse(reply)) {
+      return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+    }
   } catch (e) {
     console.error("❌ Pollinations API Error:", e.message);
   }
 
-  // 3️⃣ Hercai
+  // 3️⃣ API ฟรีสำรองตัวที่ 2 (Hercai AI)
   try {
-    const res = await axios.get(`https://hercai.onrender.com/v3/hercai?question=${encodeURIComponent(fullPromptGET)}`, { timeout: 15000 });
+    const res = await axios.get(`https://hercai.onrender.com/v3/hercai?question=${encodeURIComponent(fullPromptGET)}`, {
+      timeout: 15000
+    });
     if (res.data && res.data.reply && isValidAiResponse(res.data.reply)) {
       return res.data.reply.length > 1900 ? res.data.reply.slice(0, 1900) + '...' : res.data.reply;
     }
@@ -197,9 +211,11 @@ async function getAiResponse(text) {
     console.error("❌ Hercai API Error:", e.message);
   }
 
-  // 4️⃣ Popcat
+  // 4️⃣ API ฟรีสำรองตัวที่ 3 (Popcat Chatbot)
   try {
-    const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(safeText)}&owner=Owner&botname=AI`, { timeout: 10000 });
+    const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(safeText)}&owner=Owner&botname=AI`, {
+      timeout: 10000
+    });
     if (res.data && res.data.response && isValidAiResponse(res.data.response)) {
       return res.data.response.length > 1900 ? res.data.response.slice(0, 1900) + '...' : res.data.response;
     }
@@ -207,6 +223,7 @@ async function getAiResponse(text) {
     console.error("❌ Popcat API Error:", e.message);
   }
 
+  // 5️⃣ ข้อความสำรองฉุกเฉิน
   return FALLBACK_ANSWERS[Math.floor(Math.random() * FALLBACK_ANSWERS.length)];
 }
 
@@ -241,7 +258,7 @@ function startAvatarAutoRotate() {
 }
 
 // ==========================================
-// ⏱️ 6. Cooldown
+// ⏱️ 6. Cooldown กันสแปม
 // ==========================================
 const cooldownMap = new Map();
 function isOnCooldown(userId) {
@@ -277,8 +294,8 @@ client.once(Events.ClientReady, () => {
 // ==========================================
 // 🎛️ 8. แผงควบคุม (อุดรอยรั่วความยาวข้อความและเมนู)
 // ==========================================
-const fmtChannels = (ids) => (ids.length ? ids.map((id) => `<#${id}>`).join(' ') : 'ทุกห้อง');
-const fmtRoles = (ids) => (ids.length ? ids.map((id) => `<@&${id}>`).join(' ') : 'ทุกคน');
+const fmtChannels = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<#${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกห้อง');
+const fmtRoles = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<@&${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกคน');
 
 function buildPanelPayload() {
   const customLen = cfg.customPrompt ? cfg.customPrompt.length : 0;
@@ -286,7 +303,7 @@ function buildPanelPayload() {
     ? `📝 Prompt: ${customLen > 50 ? cfg.customPrompt.trim().slice(0, 50) + '...' : cfg.customPrompt.trim()}`
     : `🎭 โหมด: ${MODE_LABELS[cfg.mode] || cfg.mode}`;
     
-  let apiStatus = '🔴 ใช้ระบบฟรีอัตโนมัติ';
+  let apiStatus = '🔴 ใช้ระบบฟรีอัตโนมัติ (เสี่ยงโดนบล็อกสูง)';
   if (cfg.customApiKey && cfg.customApiKey.trim() !== '') {
     const provider = detectApiProvider(cfg.customApiKey);
     apiStatus = `🟢 ใช้ค่าย: **${provider.name}**`;
@@ -371,9 +388,9 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.content.trim()) return; 
   if (cfg.blacklistUserIds.includes(message.author.id)) return;
   
-  if (cfg.targetChannelIds.length > 0 && !cfg.targetChannelIds.includes(message.channel.id)) return;
+  if (cfg.targetChannelIds && cfg.targetChannelIds.length > 0 && !cfg.targetChannelIds.includes(message.channel.id)) return;
   
-  if (cfg.targetRoleIds.length > 0) {
+  if (cfg.targetRoleIds && cfg.targetRoleIds.length > 0) {
     const hasRole = message.member?.roles?.cache?.some((r) => cfg.targetRoleIds.includes(r.id));
     if (!hasRole) return;
   }
@@ -391,17 +408,11 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 // ==========================================
-// 🕹️ 10. Interaction Handling (การันตีความปลอดภัยสูงสุด Type Guards)
+// 🕹️ 10. Interaction Handling (การันตีความปลอดภัยสูงสุดด้วย Type Guards)
 // ==========================================
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    // กรองเฉพาะ Custom IDs ของแผงควบคุม
-    const panelCustomIds = [
-      'btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt',
-      'btn_set_api', 'btn_clear_api', 'select_mode', 'select_roles', 'select_channels', 
-      'modal_set_prompt', 'modal_set_api'
-    ];
-    
+    // แยกส่วนปุ่มลบข้อความก่อน ป้องกันบัค CustomId ผิดปกติ
     if (interaction.isButton() && interaction.customId.startsWith('del_')) {
       const ownerId = interaction.customId.split('_')[1];
       if (interaction.user.id !== ownerId) {
@@ -411,13 +422,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.message.delete().catch(() => {}); 
     }
 
-    if (!panelCustomIds.includes(interaction.customId)) return;
+    // กรองเฉพาะ Custom IDs ของแผงควบคุม ป้องกันบัคชนกับบอทอื่น
+    const panelCustomIds = [
+      'btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt',
+      'btn_set_api', 'btn_clear_api', 'select_mode', 'select_roles', 'select_channels', 
+      'modal_set_prompt', 'modal_set_api'
+    ];
+    
+    if (!interaction.customId || !panelCustomIds.includes(interaction.customId)) return;
 
     if (!checkHasPermission(interaction.user.id)) {
       return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์กดแผงควบคุมนี้!', ephemeral: true }).catch(() => {});
     }
 
-    // 🔥 ตรวจสอบปุ่มกด (Button)
+    // 🔥 สวิตช์ 1: สำหรับการกดปุ่ม (Buttons)
     if (interaction.isButton()) {
       if (interaction.customId === 'btn_set_prompt') {
         const modal = new ModalBuilder().setCustomId('modal_set_prompt').setTitle('ตั้ง Prompt นิสัยบอทเอง');
@@ -457,19 +475,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 🔥 ตรวจสอบเมนูตัวเลือก (Select Menu)
+    // 🔥 สวิตช์ 2: สำหรับการเลือกเมนู (Select Menus)
     if (interaction.isAnySelectMenu()) {
       if (interaction.customId === 'select_mode') {
-        cfg.mode = interaction.values[0];
+        cfg.mode = interaction.values[0] || 'normal';
         cfg.customPrompt = ''; 
       } else if (interaction.customId === 'select_roles') {
-        cfg.targetRoleIds = interaction.values;
+        cfg.targetRoleIds = interaction.values || [];
       } else if (interaction.customId === 'select_channels') {
-        cfg.targetChannelIds = interaction.values;
+        cfg.targetChannelIds = interaction.values || [];
       }
     }
 
-    // 🔥 ตรวจสอบหน้าต่างกรอกข้อมูล (Modal Submit)
+    // 🔥 สวิตช์ 3: สำหรับหน้าต่างกรอกข้อมูล (Modal Submit)
     if (interaction.isModalSubmit()) {
       if (interaction.customId === 'modal_set_prompt') {
         cfg.customPrompt = interaction.fields.getTextInputValue('prompt_input').trim();
@@ -478,11 +496,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    // เซฟข้อมูล และอัปเดตแผงควบคุม (ดักจับ Error กรณีคนกดรัวๆ)
     saveConfig(); 
     
-      // อัปเดตแผงควบคุม (ยกเว้นปุ่ม avatar เพราะอัปเดตไปแล้ว และถ้าเป็นปุ่มปกติให้แสดงผลลัพธ์)
     if (interaction.customId !== 'btn_avatar' && !interaction.customId.startsWith('btn_set_')) {
-      await interaction.update(buildPanelPayload()).catch(() => {});
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.update(buildPanelPayload()).catch(() => {});
+      }
     }
 
   } catch (err) {
