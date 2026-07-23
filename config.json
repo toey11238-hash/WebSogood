@@ -2,8 +2,6 @@
   "isActive": true,
   "mode": "normal",
   "customPrompt": "",
-  "targetChannelIds": [],
-  "targetRoleIds": [],
   "blacklistUserIds": [],
   "cooldownSeconds": 3,
   "statusText": "รอรับคำสั่งเจ้านาย 💬",
