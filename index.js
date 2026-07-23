@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActivityType, EmbedBuilder } = require('discord.js');
+  StringSelectMenuBuilder, RoleSelectMenuBuilder, ChannelSelectMenuBuilder, ModalBuilder,
+  TextInputBuilder, TextInputStyle, ActivityType, EmbedBuilder, ChannelType } = require('discord.js');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -21,15 +22,11 @@ app.listen(port, '0.0.0.0', () => {
 });
 
 // ==========================================
-// ⚙️ 1. อ่านค่า Environment Variables (รองรับหลาย ID + คำสั่งลับ)
+// ⚙️ 1. อ่านค่า Environment Variables
 // ==========================================
 const TOKEN = process.env.DISCORD_TOKEN;
-
-// รองรับหลาย ID คั่นด้วยเครื่องหมายจุลภาค (,) หรือใส่ ALL เพื่อเปิดให้ทุกคนใช้ได้
 const OWNER_ID_RAW = process.env.OWNER_ID ? process.env.OWNER_ID.trim() : 'ALL';
 const OWNER_IDS = OWNER_ID_RAW.split(',').map(id => id.trim()).filter(Boolean);
-
-// ตั้งชื่อคำสั่งเปิดแผงควบคุมลับเองได้ (ถ้าไม่ตั้ง จะใช้ !panel เป็นค่าเริ่มต้น)
 const PANEL_COMMAND = process.env.PANEL_CMD ? process.env.PANEL_CMD.trim() : '!panel';
 
 if (!TOKEN) {
@@ -37,7 +34,6 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-// ฟังก์ชันเช็คสิทธิ์ใช้งาน
 function checkHasPermission(userId) {
   if (OWNER_IDS.includes('ALL') || OWNER_IDS.length === 0) return true;
   return OWNER_IDS.includes(userId);
@@ -51,6 +47,8 @@ const DEFAULT_CONFIG = {
   isActive: true,
   mode: 'normal',
   customPrompt: '',
+  targetChannelIds: [],
+  targetRoleIds: [],
   blacklistUserIds: [],
   cooldownSeconds: 3,
   statusText: 'รอรับคำสั่งเจ้านาย 💬',
@@ -103,9 +101,24 @@ function getSystemPrompt() {
 }
 
 // ==========================================
-// 🧠 4. AI Response (Pollinations ฟรี)
+// 🧠 4. ระบบ API ฟรีครอบจักรวาล (ใส่ของตัวเองได้ที่นี่!)
 // ==========================================
-const AI_MODEL_CHAIN = ['mistral', 'llama', 'searchgpt']; 
+
+// 👉 จุดที่ 1: ถ้าคุณหา API ฟรีแบบ GET มาได้ (เช่น เว็บที่พิมพ์ข้อความต่อท้ายลิงก์แล้วได้คำตอบเลย) เอาลิงก์มาใส่ตรงนี้
+const MY_CUSTOM_GET_APIS = [
+  // ตัวอย่างการใส่ (ลบ // ออกเพื่อใช้งาน):
+  // "https://api.somefreeapi.com/chat?text=",
+  // "https://another-free-api.net/ask?q="
+];
+
+// 👉 จุดที่ 2: ถ้าคุณได้ API ฟรีที่จำลองโครงสร้างเหมือน OpenAI (POST JSON) เอามาใส่ตรงนี้
+const MY_CUSTOM_POST_APIS = [
+  // ตัวอย่าง (ลบ // ออกเพื่อใช้งาน และเปลี่ยน URL/KEY ถ้ามี):
+  // { url: "https://free-openai-proxy.com/v1/chat/completions", key: "ถ้ามีให้ใส่ ไม่มีปล่อยว่าง", model: "gpt-3.5-turbo" }
+];
+
+// 👉 จุดที่ 3: API ฟรีสำรองที่โค้ดมีให้แต่แรก (ฟรี 100% ไม่ต้องตั้งค่า)
+const DEFAULT_FREE_MODELS = ['openai', 'mistral', 'llama', 'searchgpt']; 
 const FALLBACK_ANSWERS = [
   'อืมมม... ว่าไงต่อนะ?',
   'พิมพ์มาแค่นี้ AI งงเลยนะเนี่ย 😅',
@@ -114,22 +127,74 @@ const FALLBACK_ANSWERS = [
 
 async function getAiResponse(text) {
   const systemPrompt = getSystemPrompt();
-  for (const model of AI_MODEL_CHAIN) {
+
+  // 1️⃣ ลองเรียกใช้ Custom POST API ที่คุณใส่เองก่อน (ถ้ามี)
+  for (const api of MY_CUSTOM_POST_APIS) {
     try {
-      const res = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(text)}`, {
-        params: { system: systemPrompt, model },
-        headers: { Accept: 'text/plain', 'User-Agent': 'Mozilla/5.0' },
-        timeout: 10000,
-      });
-      const reply = res.data;
-      if (typeof reply !== 'string' || !reply.trim() || reply.toLowerCase().includes('<!doctype html') || reply.toLowerCase().includes('<html')) {
-        throw new Error('Invalid response');
+      const headers = { 'Content-Type': 'application/json' };
+      if (api.key) headers['Authorization'] = `Bearer ${api.key}`;
+      
+      const res = await axios.post(api.url, {
+        model: api.model || 'default',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: text }
+        ]
+      }, { headers, timeout: 10000 });
+      
+      const reply = res.data?.choices?.[0]?.message?.content;
+      if (reply) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+    } catch (e) { console.log("Custom POST API Failed, trying next..."); }
+  }
+
+  // 2️⃣ ลองเรียกใช้ Custom GET API ที่คุณใส่เอง (ถ้ามี)
+  for (const url of MY_CUSTOM_GET_APIS) {
+    try {
+      const res = await axios.get(`${url}${encodeURIComponent(text)}`, { timeout: 8000 });
+      const reply = typeof res.data === 'string' ? res.data : (res.data.reply || res.data.response || res.data.message || JSON.stringify(res.data));
+      if (reply && !reply.toLowerCase().includes('<!doctype html')) {
+        return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
       }
-      return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+    } catch (e) { console.log("Custom GET API Failed, trying next..."); }
+  }
+
+  // 3️⃣ ถ้าคุณไม่ได้ใส่ API เอง หรือตัวบนๆ พังหมด จะไหลมาใช้ของฟรีที่ผมเตรียมไว้ให้ (Pollinations)
+  for (const model of DEFAULT_FREE_MODELS) {
+    try {
+      const res = await axios.post('https://text.pollinations.ai/', {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: text }
+        ],
+        model: model,
+        seed: Math.floor(Math.random() * 100000)
+      }, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      });
+
+      let reply = res.data;
+      if (typeof reply === 'object' && reply.content) reply = reply.content;
+      if (typeof reply === 'string' && reply.trim() && !reply.toLowerCase().includes('<!doctype html') && !reply.toLowerCase().includes('<html')) {
+        return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+      }
     } catch (e) {
-      continue; 
+      // ระบบสำรองชั้นสุดท้าย
+      try {
+        const resGet = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(text)}`, {
+          params: { system: systemPrompt, model },
+          headers: { Accept: 'text/plain', 'User-Agent': 'Mozilla/5.0' },
+          timeout: 8000
+        });
+        const replyGet = resGet.data;
+        if (typeof replyGet === 'string' && replyGet.trim() && !replyGet.toLowerCase().includes('<!doctype html')) {
+          return replyGet.length > 1900 ? replyGet.slice(0, 1900) + '...' : replyGet;
+        }
+      } catch (e2) { continue; }
     }
   }
+
+  // 4️⃣ ถ้า API ทุกตัวในโลกพังหมด (เน็ตขาด) จะใช้คำพูดสำรอง
   return FALLBACK_ANSWERS[Math.floor(Math.random() * FALLBACK_ANSWERS.length)];
 }
 
@@ -198,8 +263,11 @@ client.once(Events.ClientReady, () => {
 });
 
 // ==========================================
-// 🎛️ 8. แผงควบคุม (Standard Discord UI)
+// 🎛️ 8. แผงควบคุม (เต็มรูปแบบ 5 แถว)
 // ==========================================
+const fmtChannels = (ids) => (ids.length ? ids.map((id) => `<#${id}>`).join(' ') : 'ทุกห้อง');
+const fmtRoles = (ids) => (ids.length ? ids.map((id) => `<@&${id}>`).join(' ') : 'ทุกคน');
+
 function buildPanelPayload() {
   const promptLine = cfg.customPrompt && cfg.customPrompt.trim()
     ? `📝 Prompt: ${cfg.customPrompt.trim().slice(0, 100)}...`
@@ -211,8 +279,9 @@ function buildPanelPayload() {
     .setDescription(
       `สถานะ: **${cfg.isActive ? '🟢 เปิดใช้งาน' : '🔴 ปิดใช้งาน'}**\n` +
       `${promptLine}\n` +
-      `⏱️ กันสแปม: ${cfg.cooldownSeconds} วินาที/คน\n` +
-      `🖼️ สุ่มรูป: ${cfg.avatarAutoRotate ? `ทุก ${cfg.avatarRotateMinutes} นาที` : 'ปิด'}`
+      `📌 ห้องที่ตอบ: ${fmtChannels(cfg.targetChannelIds)}\n` +
+      `🎖️ ยศที่ตอบ: ${fmtRoles(cfg.targetRoleIds)}\n` +
+      `⏱️ กันสแปม: ${cfg.cooldownSeconds} วินาที/คน | 🖼️ สุ่มรูป: ${cfg.avatarAutoRotate ? `ทุก ${cfg.avatarRotateMinutes} นาที` : 'ปิด'}`
     );
 
   const row1 = new ActionRowBuilder().addComponents(
@@ -231,7 +300,18 @@ function buildPanelPayload() {
       .addOptions(Object.entries(MODE_LABELS).map(([value, label]) => ({ label, value, default: cfg.mode === value })))
   );
 
-  return { embeds: [embed], components: [row1, row2, row3] };
+  const row4 = new ActionRowBuilder().addComponents(
+    new RoleSelectMenuBuilder().setCustomId('select_roles').setPlaceholder('🎖️ เลือกยศที่ให้บอทตอบ (ไม่เลือก = ทุกคน)')
+      .setMinValues(0).setMaxValues(5)
+  );
+
+  const row5 = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder().setCustomId('select_channels').setPlaceholder('📌 เลือกห้องที่ให้บอทตอบ (ไม่เลือก = ทุกห้อง)')
+      .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setMinValues(0).setMaxValues(5)
+  );
+
+  return { embeds: [embed], components: [row1, row2, row3, row4, row5] };
 }
 
 // ==========================================
@@ -246,7 +326,6 @@ client.on(Events.MessageCreate, async (message) => {
     return message.reply(`**วิธีใช้งาน:** พิมพ์ข้อความคุยกับบอทได้เลย\n*(สำหรับเจ้าของบอท ใช้คำสั่งเปิดแผงควบคุม)*`);
   }
 
-  // เรียกแผงควบคุมตามคำสั่งที่ตั้งไว้ (เช่น !panel หรือ คำสั่งลับ)
   if (message.content === PANEL_COMMAND) {
     if (!hasPerm) {
       return message.reply(`❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${message.author.id}\`)`);
@@ -266,9 +345,17 @@ client.on(Events.MessageCreate, async (message) => {
 
   // ระบบตอบอัตโนมัติ AI
   if (!cfg.isActive) return;
-  if (message.content.startsWith('!')) return; // ไม่ตอบคำสั่งที่ขึ้นต้นด้วย !
-  if (!message.content.trim()) return; // ข้ามข้อความว่าง (ส่งรูปสติกเกอร์อย่างเดียว)
+  if (message.content.startsWith('!')) return;
+  if (!message.content.trim()) return; 
   if (cfg.blacklistUserIds.includes(message.author.id)) return;
+  
+  if (cfg.targetChannelIds.length && !cfg.targetChannelIds.includes(message.channel.id)) return;
+  
+  if (cfg.targetRoleIds.length) {
+    const hasRole = message.member?.roles.cache.some((r) => cfg.targetRoleIds.includes(r.id));
+    if (!hasRole) return;
+  }
+
   if (isOnCooldown(message.author.id)) return message.react('⏳').catch(() => {});
 
   await message.channel.sendTyping().catch(() => {});
@@ -294,7 +381,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return interaction.message.delete().catch(() => {});
   }
 
-  const panelCustomIds = ['btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt', 'select_mode', 'modal_set_prompt'];
+  const panelCustomIds = ['btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt', 'select_mode', 'select_roles', 'select_channels', 'modal_set_prompt'];
   if (!interaction.customId || !panelCustomIds.includes(interaction.customId)) return;
 
   if (!checkHasPermission(interaction.user.id)) {
@@ -326,6 +413,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else if (interaction.isStringSelectMenu() && interaction.customId === 'select_mode') {
       cfg.mode = interaction.values[0];
       cfg.customPrompt = ''; 
+    } else if (interaction.isRoleSelectMenu() && interaction.customId === 'select_roles') {
+      cfg.targetRoleIds = interaction.values;
+    } else if (interaction.isChannelSelectMenu() && interaction.customId === 'select_channels') {
+      cfg.targetChannelIds = interaction.values;
     } else if (interaction.isModalSubmit() && interaction.customId === 'modal_set_prompt') {
       cfg.customPrompt = interaction.fields.getTextInputValue('prompt_input').trim();
     }
@@ -336,4 +427,3 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.login(TOKEN);
-        
