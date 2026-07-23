@@ -2,6 +2,7 @@
   "isActive": true,
   "mode": "normal",
   "customPrompt": "",
+  "customApiKey": "",
   "targetChannelIds": [],
   "targetRoleIds": [],
   "blacklistUserIds": [],
