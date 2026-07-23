@@ -101,28 +101,18 @@ function getSystemPrompt() {
 }
 
 // ==========================================
-// 🧠 4. ระบบ API ฟรีครอบจักรวาล (ใส่ของตัวเองได้ที่นี่!)
+// 🧠 4. ระบบ API ฟรี (อัปเกรดระบบพรางตัว + เพิ่ม AI สำรอง)
 // ==========================================
 
-// 👉 จุดที่ 1: ถ้าคุณหา API ฟรีแบบ GET มาได้ (เช่น เว็บที่พิมพ์ข้อความต่อท้ายลิงก์แล้วได้คำตอบเลย) เอาลิงก์มาใส่ตรงนี้
-const MY_CUSTOM_GET_APIS = [
-  // ตัวอย่างการใส่ (ลบ // ออกเพื่อใช้งาน):
-  // "https://api.somefreeapi.com/chat?text=",
-  // "https://another-free-api.net/ask?q="
-];
+// 👉 จุดที่ 1 & 2: สำหรับใส่ API ของตัวเอง (ถ้ามี)
+const MY_CUSTOM_POST_APIS = [];
+const MY_CUSTOM_GET_APIS = [];
 
-// 👉 จุดที่ 2: ถ้าคุณได้ API ฟรีที่จำลองโครงสร้างเหมือน OpenAI (POST JSON) เอามาใส่ตรงนี้
-const MY_CUSTOM_POST_APIS = [
-  // ตัวอย่าง (ลบ // ออกเพื่อใช้งาน และเปลี่ยน URL/KEY ถ้ามี):
-  // { url: "https://free-openai-proxy.com/v1/chat/completions", key: "ถ้ามีให้ใส่ ไม่มีปล่อยว่าง", model: "gpt-3.5-turbo" }
-];
-
-// 👉 จุดที่ 3: API ฟรีสำรองที่โค้ดมีให้แต่แรก (ฟรี 100% ไม่ต้องตั้งค่า)
-const DEFAULT_FREE_MODELS = ['openai', 'mistral', 'llama', 'searchgpt']; 
 const FALLBACK_ANSWERS = [
   'อืมมม... ว่าไงต่อนะ?',
   'พิมพ์มาแค่นี้ AI งงเลยนะเนี่ย 😅',
   'รับทราบ! มีอะไรให้รับใช้อีกไหม?',
+  'กำลังแก้ โปรดรอสักครู่',
 ];
 
 async function getAiResponse(text) {
@@ -133,18 +123,13 @@ async function getAiResponse(text) {
     try {
       const headers = { 'Content-Type': 'application/json' };
       if (api.key) headers['Authorization'] = `Bearer ${api.key}`;
-      
       const res = await axios.post(api.url, {
         model: api.model || 'default',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: text }
-        ]
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }]
       }, { headers, timeout: 10000 });
-      
       const reply = res.data?.choices?.[0]?.message?.content;
       if (reply) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
-    } catch (e) { console.log("Custom POST API Failed, trying next..."); }
+    } catch (e) { console.error("❌ Custom POST API Failed:", e.message); }
   }
 
   // 2️⃣ ลองเรียกใช้ Custom GET API ที่คุณใส่เอง (ถ้ามี)
@@ -152,49 +137,42 @@ async function getAiResponse(text) {
     try {
       const res = await axios.get(`${url}${encodeURIComponent(text)}`, { timeout: 8000 });
       const reply = typeof res.data === 'string' ? res.data : (res.data.reply || res.data.response || res.data.message || JSON.stringify(res.data));
-      if (reply && !reply.toLowerCase().includes('<!doctype html')) {
-        return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
-      }
-    } catch (e) { console.log("Custom GET API Failed, trying next..."); }
+      if (reply && !reply.toLowerCase().includes('<!doctype html')) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
+    } catch (e) { console.error("❌ Custom GET API Failed:", e.message); }
   }
 
-  // 3️⃣ ถ้าคุณไม่ได้ใส่ API เอง หรือตัวบนๆ พังหมด จะไหลมาใช้ของฟรีที่ผมเตรียมไว้ให้ (Pollinations)
-  for (const model of DEFAULT_FREE_MODELS) {
-    try {
-      const res = await axios.post('https://text.pollinations.ai/', {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: text }
-        ],
-        model: model,
-        seed: Math.floor(Math.random() * 100000)
-      }, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000
-      });
-
-      let reply = res.data;
-      if (typeof reply === 'object' && reply.content) reply = reply.content;
-      if (typeof reply === 'string' && reply.trim() && !reply.toLowerCase().includes('<!doctype html') && !reply.toLowerCase().includes('<html')) {
-        return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
-      }
-    } catch (e) {
-      // ระบบสำรองชั้นสุดท้าย
-      try {
-        const resGet = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(text)}`, {
-          params: { system: systemPrompt, model },
-          headers: { Accept: 'text/plain', 'User-Agent': 'Mozilla/5.0' },
-          timeout: 8000
-        });
-        const replyGet = resGet.data;
-        if (typeof replyGet === 'string' && replyGet.trim() && !replyGet.toLowerCase().includes('<!doctype html')) {
-          return replyGet.length > 1900 ? replyGet.slice(0, 1900) + '...' : replyGet;
-        }
-      } catch (e2) { continue; }
+  // 3️⃣ API ฟรีหลัก (Pollinations) + ระบบพรางตัวไม่ให้ Render โดนบล็อก
+  try {
+    const res = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(text)}`, {
+      params: { system: systemPrompt, model: 'openai' },
+      headers: { 
+        'Accept': 'text/plain',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+      },
+      timeout: 15000 // เพิ่มเวลาให้ AI คิด (เผื่อเน็ต Render ช้า)
+    });
+    
+    const reply = res.data;
+    if (typeof reply === 'string' && reply.trim() && !reply.toLowerCase().includes('<html')) {
+      return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
     }
+  } catch (e) {
+    console.error("❌ Pollinations API Error (อาจจะโดนบล็อก IP ชั่วคราว):", e.message);
   }
 
-  // 4️⃣ ถ้า API ทุกตัวในโลกพังหมด (เน็ตขาด) จะใช้คำพูดสำรอง
+  // 4️⃣ API ฟรีสำรองตัวที่ 2 (Popcat Chatbot) ทำงานเมื่อตัวแรกโดนบล็อก
+  try {
+    const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(text)}&owner=Owner&botname=AI`, {
+      timeout: 10000
+    });
+    if (res.data && res.data.response) {
+      return res.data.response.length > 1900 ? res.data.response.slice(0, 1900) + '...' : res.data.response;
+    }
+  } catch (e) {
+    console.error("❌ Popcat API Error:", e.message);
+  }
+
+  // 5️⃣ ถ้า API ทุกตัวในโลกพังหมด (เน็ตขาด) จะใช้คำพูดสำรอง
   return FALLBACK_ANSWERS[Math.floor(Math.random() * FALLBACK_ANSWERS.length)];
 }
 
