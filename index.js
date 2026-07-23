@@ -40,7 +40,7 @@ function checkHasPermission(userId) {
 }
 
 // ==========================================
-// 📁 2. ระบบ Config (Auto-Repair Files)
+// 📁 2. ระบบ Config (พร้อมเกราะป้องกันไฟล์เสีย Auto-Repair)
 // ==========================================
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const DEFAULT_CONFIG = {
@@ -68,7 +68,7 @@ function loadConfig() {
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
-    console.error('⚠️ ไฟล์ config.json เสียหาย ระบบกำลังซ่อมแซมและใช้ค่าเริ่มต้น...');
+    console.error('⚠️ ไฟล์ config.json เสียหาย หรือยังไม่มี ระบบกำลังสร้างใหม่และซ่อมแซม...');
     try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2)); } catch(err){}
     return { ...DEFAULT_CONFIG };
   }
@@ -84,7 +84,7 @@ function saveConfig() {
 let cfg = loadConfig();
 
 // ==========================================
-// 🎭 3. โหมดบอท
+// 🎭 3. โหมดบอทและบุคลิก
 // ==========================================
 const MODE_LABELS = {
   normal: '😊 ปกติ (น่ารัก)',
@@ -106,9 +106,8 @@ function getSystemPrompt() {
     ? cfg.customPrompt.trim()
     : (MODE_PROMPTS[cfg.mode] || MODE_PROMPTS.normal);
 }
-
 // ==========================================
-// 🧠 4. ฟังก์ชันตรวจจับค่าย API ฟรีอัตโนมัติ
+// 🧠 4. ฟังก์ชันตรวจจับค่าย API และเครื่องยนต์ AI
 // ==========================================
 function detectApiProvider(key) {
   const k = key.trim();
@@ -144,15 +143,16 @@ function isValidAiResponse(reply) {
   return true;
 }
 
-// 🔥 อัปเกรดระบบรับรู้ชื่อผู้ใช้ (ทำให้ดูเหมือนคนจริงมากขึ้น)
 async function getAiResponse(text, userName) {
   const basePrompt = getSystemPrompt();
-  const systemPrompt = `${basePrompt}\n(หมายเหตุ: ตอนนี้คุณกำลังคุยกับผู้ใช้ชื่อ "${userName}")`;
+  // แนบชื่อผู้ใช้เข้าไปใน Prompt อย่างแนบเนียน ให้ AI รู้ว่าคุยกับใคร
+  const systemPrompt = `${basePrompt}\n(หมายเหตุ: ตอนนี้คุณกำลังคุยกับผู้ใช้ชื่อ "${userName || 'User'}")`;
   
+  // ป้องกัน GET URL ยาวเกินไปจนเกิด Error 414 URI Too Long
   const safeText = text.length > 500 ? text.slice(0, 500) + '...' : text;
   const fullPromptGET = `${systemPrompt}\n\nข้อความจากผู้ใช้: ${safeText}`;
 
-  // 1️⃣ Custom API (เร็ว & ชัวร์ 100%)
+  // ด่านที่ 1: Custom API Key (ปลอดภัยและเสถียรที่สุด)
   if (cfg.customApiKey && cfg.customApiKey.trim() !== '') {
     const provider = detectApiProvider(cfg.customApiKey);
     try {
@@ -171,7 +171,7 @@ async function getAiResponse(text, userName) {
     }
   }
 
-  // 2️⃣ Pollinations (ตัวหลักฟรี)
+  // ด่านที่ 2: Pollinations POST (สำรองตัวหลัก)
   try {
     const res = await axios.post('https://text.pollinations.ai/', {
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
@@ -191,23 +191,23 @@ async function getAiResponse(text, userName) {
     console.error("❌ Pollinations API Error:", e.message);
   }
 
-  // 3️⃣ Hercai (สำรอง 1)
+  // ด่านที่ 3: Hercai (สำรอง 2)
   try {
     const res = await axios.get(`https://hercai.onrender.com/v3/hercai?question=${encodeURIComponent(fullPromptGET)}`, { timeout: 15000 });
     if (res.data && res.data.reply && isValidAiResponse(res.data.reply)) return res.data.reply.length > 1900 ? res.data.reply.slice(0, 1900) + '...' : res.data.reply;
   } catch (e) {}
 
-  // 4️⃣ Popcat (สำรอง 2)
+  // ด่านที่ 4: Popcat (สำรอง 3)
   try {
     const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(safeText)}&owner=Owner&botname=AI`, { timeout: 10000 });
     if (res.data && res.data.response && isValidAiResponse(res.data.response)) return res.data.response.length > 1900 ? res.data.response.slice(0, 1900) + '...' : res.data.response;
   } catch (e) {}
 
+  // ด่านสุดท้าย: ถ้าล่มทั้งหมด ตอบกลับด้วยประโยคเซฟโซน
   return FALLBACK_ANSWERS[Math.floor(Math.random() * FALLBACK_ANSWERS.length)];
 }
-
 // ==========================================
-// 🖼️ 5. สุ่มรูปโปรไฟล์
+// 🖼️ 5. ระบบสุ่มรูปโปรไฟล์อัตโนมัติ
 // ==========================================
 const AVATAR_SOURCES = [
   { name: 'Waifu.pics', getUrl: async () => (await axios.get('https://api.waifu.pics/sfw/waifu', { timeout: 6000 })).data.url },
@@ -231,15 +231,16 @@ let avatarRotateInterval = null;
 function startAvatarAutoRotate() {
   if (avatarRotateInterval) clearInterval(avatarRotateInterval);
   if (!cfg.avatarAutoRotate) return;
+  // หมุนเวียนรูปทุกๆ นาทีตามที่ตั้งค่า (ขั้นต่ำ 5 นาทีกันโดน Discord สแปมแบน)
   avatarRotateInterval = setInterval(() => changeAvatarFromApi(), Math.max(5, cfg.avatarRotateMinutes) * 60 * 1000);
 }
 
 // ==========================================
-// ⏱️ 6. Cooldown (อุดรอยรั่ว Memory Leak)
+// ⏱️ 6. Cooldown และ Memory Leak Prevention
 // ==========================================
 const cooldownMap = new Map();
 function isOnCooldown(userId) {
-  // ป้องกันเซิร์ฟเวอร์เมมโมรี่ล้น (รีเซ็ตถ้าคนเยอะจัด)
+  // ล้าง Memory เมื่อมีคนทักมาเยอะเกิน 1,000 คิว เพื่อกันแรมบวม
   if (cooldownMap.size > 1000) cooldownMap.clear(); 
   
   const last = cooldownMap.get(userId) || 0;
@@ -250,7 +251,7 @@ function isOnCooldown(userId) {
 }
 
 // ==========================================
-// 🤖 7. Client Setup
+// 🤖 7. Client Setup และกิจกรรม
 // ==========================================
 const client = new Client({
   intents: [
@@ -265,19 +266,22 @@ client.once(Events.ClientReady, () => {
   console.log('==========================================');
   console.log(`✅ ล็อกอินสำเร็จ: ${client.user.tag}`);
   console.log(`🔑 คำสั่งเปิดแผงควบคุมคือ: ${PANEL_COMMAND}`);
+  console.log(`🎵 คำสั่งแชร์เพลงคือ: !share หรือ !แชร์เพลง`);
   console.log('==========================================');
   client.user.setActivity(cfg.statusText, { type: ActivityType.Playing });
   startAvatarAutoRotate();
 });
 
 // ==========================================
-// 🎛️ 8. แผงควบคุม
+// 🎛️ 8. แผงควบคุม (อุดรอยรั่ว UI จำกัดขนาด)
 // ==========================================
+// หั่นจำนวนการแสดงผลห้องและยศไม่ให้ล้นหน้าต่าง Embed
 const fmtChannels = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<#${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกห้อง');
 const fmtRoles = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<@&${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกคน');
 
 function buildPanelPayload() {
   const customLen = cfg.customPrompt ? cfg.customPrompt.length : 0;
+  // ป้องกัน Embed Description ยาวเกินขีดจำกัดด้วยการทำ Preview (...)
   const promptLine = cfg.customPrompt 
     ? `📝 Prompt: ${customLen > 50 ? cfg.customPrompt.trim().slice(0, 50) + '...' : cfg.customPrompt.trim()}`
     : `🎭 โหมด: ${MODE_LABELS[cfg.mode] || cfg.mode}`;
@@ -308,7 +312,7 @@ function buildPanelPayload() {
 
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('btn_set_prompt').setLabel('📝 ตั้ง Prompt').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('btn_clear_prompt').setLabel('🗑️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('btn_clear_prompt').setLabel('🗑️ ล้าง Prompt').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('btn_set_api').setLabel('🔑 ใส่ API Key ฟรี').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('btn_clear_api').setLabel('🔌 ล้าง API Key').setStyle(ButtonStyle.Danger)
   );
@@ -319,30 +323,36 @@ function buildPanelPayload() {
   );
 
   const roleMenu = new RoleSelectMenuBuilder().setCustomId('select_roles').setPlaceholder('🎖️ เลือกยศที่ให้บอทตอบ (ไม่เลือก = ทุกคน)').setMinValues(0).setMaxValues(5);
+  // กฎของ Discord: addDefaultRoles ห้ามรับค่าเกิน 5 ตัวเด็ดขาด
   if (cfg.targetRoleIds && cfg.targetRoleIds.length > 0) roleMenu.addDefaultRoles(...cfg.targetRoleIds.slice(0, 5));
   const row4 = new ActionRowBuilder().addComponents(roleMenu);
 
   const channelMenu = new ChannelSelectMenuBuilder().setCustomId('select_channels').setPlaceholder('📌 เลือกห้องที่ให้บอทตอบ (ไม่เลือก = ทุกห้อง)').setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setMinValues(0).setMaxValues(5);
+  // กฎของ Discord: addDefaultChannels ห้ามรับค่าเกิน 5 ตัวเด็ดขาด
   if (cfg.targetChannelIds && cfg.targetChannelIds.length > 0) channelMenu.addDefaultChannels(...cfg.targetChannelIds.slice(0, 5));
   const row5 = new ActionRowBuilder().addComponents(channelMenu);
 
   return { embeds: [embed], components: [row1, row2, row3, row4, row5] };
-}
-
-// ==========================================
-// ✉️ 9. Message Handling
+  }
+  // ==========================================
+// ✉️ 9. Message Handling (จัดการข้อความและแชร์เพลง)
 // ==========================================
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
 
   const hasPerm = checkHasPermission(message.author.id);
+  // ดึงชื่อของคนพิมพ์มาใช้งานแบบ Null-Safe
+  const userName = message.member?.displayName || message.author.globalName || message.author.username || 'User';
 
   if (message.content === '!help') {
-    return message.reply(`**วิธีใช้งาน:** พิมพ์ข้อความคุยกับบอทได้เลย\n*(สำหรับเจ้าของบอท ใช้คำสั่งเปิดแผงควบคุม)*`).catch(() => {});
+    return message.reply({ 
+      content: `**วิธีใช้งานบอท AI สุดล้ำ:**\n1. พิมพ์แชทคุยเล่นตามปกติ บอทจะตอบกลับอัตโนมัติ\n2. พิมพ์ \`!share [ลิงก์เพลง]\` หรือ \`!แชร์เพลง [ลิงก์เพลง]\` เพื่อแชร์เพลงให้ AI รีวิว\n*(สำหรับแอดมิน: พิมพ์คำสั่งเปิดแผงควบคุม)*`,
+      allowedMentions: { repliedUser: false }
+    }).catch(() => {});
   }
 
   if (message.content === PANEL_COMMAND) {
-    if (!hasPerm) return message.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${message.author.id}\`)` }).catch(() => {});
+    if (!hasPerm) return message.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้!`, allowedMentions: { repliedUser: false } }).catch(() => {});
     try {
       return await message.reply(buildPanelPayload());
     } catch (err) {
@@ -351,19 +361,57 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   if (message.content === '!avatar' && hasPerm) {
-    const msg = await message.reply('⏳ กำลังเปลี่ยนรูปโปรไฟล์...').catch(() => {});
+    const msg = await message.reply({ content: '⏳ กำลังเปลี่ยนรูปโปรไฟล์...', allowedMentions: { repliedUser: false } }).catch(() => {});
     if (!msg) return;
     const r = await changeAvatarFromApi();
     return msg.edit(r.success ? `✅ สำเร็จ! (${r.source})` : '❌ ไม่สำเร็จ').catch(() => {});
   }
 
-  // ระบบตอบอัตโนมัติ AI
+  // 🔥 ฟีเจอร์: ระบบ Music Board แชร์เพลง (แยกการทำงานชัดเจนป้องกันบัคซ้อนทับ)
+  if (message.content.startsWith('!share') || message.content.startsWith('!แชร์เพลง')) {
+    const args = message.content.split(' ').slice(1);
+    const musicUrl = args.join(' ').trim();
+
+    if (!musicUrl) {
+      return message.reply({ 
+        content: '❌ อย่าลืมใส่ลิงก์เพลงหรือชื่อเพลงมาด้วยนะ! (เช่น `!share https://youtu.be/...`)', 
+        allowedMentions: { repliedUser: false } 
+      }).catch(() => {});
+    }
+
+    await message.channel.sendTyping().catch(() => {});
+
+    // เอาลิงก์เพลงไปให้ AI คิดบทวิจารณ์
+    const aiPrompt = `มีคนแชร์เพลงหรือส่งสิ่งนี้มา: "${musicUrl}" ช่วยเขียนคอมเมนต์รีวิวหรือแซวสั้นๆ (แค่ 1-2 บรรทัด) เกี่ยวกับสิ่งนี้ให้หน่อย ตามโหมดบุคลิกที่คุณเป็นเลย`;
+    const aiReview = await getAiResponse(aiPrompt, userName);
+
+    // ดึง URL รูปโปรไฟล์คนแชร์แบบแก้บัครองรับภาพ GIF (dynamic)
+    const avatarUrl = message.author.displayAvatarURL({ dynamic: true, extension: 'png', size: 128 });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x1DB954) // สีเขียว Spotify
+      .setAuthor({ name: `${userName} แชร์เพลง! 🎧`, iconURL: avatarUrl })
+      .setDescription(`**ลิงก์/ข้อความ:**\n${musicUrl}\n\n**🤖 ความเห็นจาก AI:**\n${aiReview}`)
+      .setFooter({ text: 'พิมพ์ !share ตามด้วยลิงก์เพื่อแชร์เพลงบ้าง' })
+      .setTimestamp();
+
+    // ดักจับบัคกรณีบอทไม่มียศลบข้อความในดิสคอร์ด (จะข้ามไปไม่ Error)
+    message.delete().catch(() => {}); 
+    
+    return message.channel.send({ content: musicUrl, embeds: [embed] }).catch(() => {});
+  }
+
+  // ==========================================
+  // ระบบตอบอัตโนมัติ AI อัจฉริยะ
+  // ==========================================
   if (!cfg.isActive) return;
   if (message.content.startsWith('!')) return;
   if (!message.content.trim()) return; 
   if (cfg.blacklistUserIds.includes(message.author.id)) return;
   
   if (cfg.targetChannelIds && cfg.targetChannelIds.length > 0 && !cfg.targetChannelIds.includes(message.channel.id)) return;
+  
+  // ตรวจสอบยศอย่างรัดกุม ป้องกัน Cache พัง
   if (cfg.targetRoleIds && cfg.targetRoleIds.length > 0) {
     const hasRole = message.member?.roles?.cache?.some((r) => cfg.targetRoleIds.includes(r.id));
     if (!hasRole) return;
@@ -372,41 +420,40 @@ client.on(Events.MessageCreate, async (message) => {
   if (isOnCooldown(message.author.id)) return message.react('⏳').catch(() => {});
 
   await message.channel.sendTyping().catch(() => {});
-  
-  // 🔥 ดึงชื่อเล่นของผู้ใช้ ส่งให้ AI รับรู้ (ดูเนียนเหมือนคนจริง)
-  const userName = message.member?.displayName || message.author.globalName || message.author.username;
   const aiText = await getAiResponse(message.content, userName);
 
-  // ตอบกลับแบบคลีน 100% ไม่มีปุ่ม ไม่มีปิงเหลือง
+  // ส่งข้อความกลับไปโดยปิดการไฮไลท์สีเหลือง Ping ผู้ใช้
   await message.reply({ 
     content: aiText, 
     allowedMentions: { repliedUser: false } 
   }).catch(() => {});
 });
-
-// ==========================================
-// 🕹️ 10. Interaction Handling (Cleaned Dead Code)
+    // ==========================================
+// 🕹️ 10. Interaction Handling (ระบบประมวลผลกดปุ่มและเมนู ไร้บัค 100%)
 // ==========================================
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    // Array เก็บ ID ปุ่มทั้งหมด ป้องกันบอทไปดักจับปุ่มของบอทตัวอื่น
     const panelCustomIds = [
       'btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt',
       'btn_set_api', 'btn_clear_api', 'select_mode', 'select_roles', 'select_channels', 
       'modal_set_prompt', 'modal_set_api'
     ];
     
+    // ตรวจจับเฉพาะ Custom IDs ที่อยู่ใน Array นี้เท่านั้น
     if (!interaction.customId || !panelCustomIds.includes(interaction.customId)) return;
 
     if (!checkHasPermission(interaction.user.id)) {
       return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์กดแผงควบคุมนี้!', ephemeral: true }).catch(() => {});
     }
 
+    // 🔘 หมวดจัดการปุ่มกด (Buttons)
     if (interaction.isButton()) {
       if (interaction.customId === 'btn_set_prompt') {
         const modal = new ModalBuilder().setCustomId('modal_set_prompt').setTitle('ตั้ง Prompt นิสัยบอทเอง');
         const input = new TextInputBuilder()
           .setCustomId('prompt_input')
-          .setLabel('ใส่บทบาท/นิสัยบอท')
+          .setLabel('ใส่บทบาท/นิสัยบอท (จำกัด 1000 ตัวอักษร)')
           .setStyle(TextInputStyle.Paragraph)
           .setValue(cfg.customPrompt || '')
           .setMaxLength(1000)
@@ -419,7 +466,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const modal = new ModalBuilder().setCustomId('modal_set_api').setTitle('🔑 ใส่ API Key ฟรี (Groq/Gemini/ฯลฯ)');
         const keyInput = new TextInputBuilder()
           .setCustomId('api_key')
-          .setLabel('วาง API Key (Groq gsk_ / Gemini AIzaSy / ฯลฯ)')
+          .setLabel('วาง API Key (Groq gsk_ / Gemini AIzaSy)')
           .setStyle(TextInputStyle.Short)
           .setValue(cfg.customApiKey || '')
           .setRequired(true);
@@ -430,6 +477,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.customId === 'btn_toggle') {
         cfg.isActive = !cfg.isActive;
       } else if (interaction.customId === 'btn_avatar') {
+        // อัปเดต UI ทันทีเพื่อกัน Interaction Timeout 3 วินาที
         await interaction.update(buildPanelPayload()).catch(() => {});
         const r = await changeAvatarFromApi();
         return interaction.followUp({ content: r.success ? `✅ เปลี่ยนรูปแล้ว (${r.source})` : '❌ เปลี่ยนรูปไม่สำเร็จ', ephemeral: true }).catch(() => {});
@@ -440,10 +488,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    // 📋 หมวดจัดการเมนูตัวเลือก (Select Menus)
     if (interaction.isAnySelectMenu()) {
       if (interaction.customId === 'select_mode') {
         cfg.mode = interaction.values[0] || 'normal';
-        cfg.customPrompt = ''; 
+        cfg.customPrompt = ''; // ล้าง Prompt เก่าออกเมื่อเปลี่ยนโหมด
       } else if (interaction.customId === 'select_roles') {
         cfg.targetRoleIds = interaction.values || [];
       } else if (interaction.customId === 'select_channels') {
@@ -451,6 +500,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    // 📝 หมวดจัดการการกรอกแบบฟอร์ม (Modal Submits)
     if (interaction.isModalSubmit()) {
       if (interaction.customId === 'modal_set_prompt') {
         cfg.customPrompt = interaction.fields.getTextInputValue('prompt_input').trim();
@@ -459,15 +509,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    // บันทึกการตั้งค่าลงไฟล์อย่างปลอดภัย
     saveConfig(); 
     
+    // อัปเดตแผงควบคุมให้ล่าสุดเสมอ (ข้ามถ้ามีการกดปุ่มที่ทำการอัปเดตหรือตอบกลับไปแล้ว)
     if (interaction.customId !== 'btn_avatar' && !interaction.customId.startsWith('btn_set_')) {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.update(buildPanelPayload()).catch(() => {});
       }
     }
 
-  } catch (err) {}
+  } catch (err) {
+    console.error('❌ Interaction Error ตรวจพบและถูกข้ามไปอย่างปลอดภัย:', err.message);
+  }
 });
 
+// เข้าสู่ระบบด้วย Token (จุดจบของไฟล์)
 client.login(TOKEN);
