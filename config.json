@@ -1,10 +1,15 @@
 {
-  "isActive": true,
-  "mode": "normal",
-  "customPrompt": "",
-  "blacklistUserIds": [],
-  "cooldownSeconds": 3,
-  "statusText": "รอรับคำสั่งเจ้านาย 💬",
-  "avatarAutoRotate": false,
-  "avatarRotateMinutes": 60
+  "name": "discord-ai-autoreply-bot",
+  "version": "1.0.0",
+  "description": "บอท Discord ตอบแชทอัตโนมัติด้วย AI พร้อมแผงควบคุมแบบเรียลไทม์",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
 }
