@@ -40,7 +40,7 @@ function checkHasPermission(userId) {
 }
 
 // ==========================================
-// 📁 2. ระบบ Config (พร้อม Auto-Repair ซ่อมไฟล์อัตโนมัติ)
+// 📁 2. ระบบ Config (Auto-Repair Files)
 // ==========================================
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const DEFAULT_CONFIG = {
@@ -128,10 +128,8 @@ const FALLBACK_ANSWERS = [
   'อืมมม... ว่าไงต่อนะ?',
   'พิมพ์มาแค่นี้ AI งงเลยนะเนี่ย 😅',
   'รับทราบ! มีอะไรให้รับใช้อีกไหม?',
-  'ตอนนี้เซิร์ฟเวอร์ AI ฝั่งผมกำลังหน่วงๆ ขออภัยด้วยนะเจ้านาย 🥲',
 ];
 
-// ฟังก์ชันคัดกรองขยะแบบเข้มงวดที่สุด
 function isValidAiResponse(reply) {
   if (!reply) return false;
   if (typeof reply !== 'string') return false;
@@ -146,13 +144,15 @@ function isValidAiResponse(reply) {
   return true;
 }
 
-async function getAiResponse(text) {
-  const systemPrompt = getSystemPrompt();
-  // ตัดข้อความกัน URL GET พัง (จำกัด 500 ตัวอักษรสำหรับ API สำรอง)
+// 🔥 อัปเกรดระบบรับรู้ชื่อผู้ใช้ (ทำให้ดูเหมือนคนจริงมากขึ้น)
+async function getAiResponse(text, userName) {
+  const basePrompt = getSystemPrompt();
+  const systemPrompt = `${basePrompt}\n(หมายเหตุ: ตอนนี้คุณกำลังคุยกับผู้ใช้ชื่อ "${userName}")`;
+  
   const safeText = text.length > 500 ? text.slice(0, 500) + '...' : text;
   const fullPromptGET = `${systemPrompt}\n\nข้อความจากผู้ใช้: ${safeText}`;
 
-  // 1️⃣ เรียกใช้ API Key ส่วนตัว (ตรวจค่ายให้อัตโนมัติ)
+  // 1️⃣ Custom API (เร็ว & ชัวร์ 100%)
   if (cfg.customApiKey && cfg.customApiKey.trim() !== '') {
     const provider = detectApiProvider(cfg.customApiKey);
     try {
@@ -160,12 +160,10 @@ async function getAiResponse(text) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${provider.key}`
       };
-      
       const res = await axios.post(provider.url, {
         model: provider.model,
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }]
       }, { headers, timeout: 15000 });
-      
       const reply = res.data?.choices?.[0]?.message?.content;
       if (isValidAiResponse(reply)) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
     } catch (e) {
@@ -173,13 +171,10 @@ async function getAiResponse(text) {
     }
   }
 
-  // 2️⃣ API ฟรีหลัก (Pollinations POST)
+  // 2️⃣ Pollinations (ตัวหลักฟรี)
   try {
     const res = await axios.post('https://text.pollinations.ai/', {
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: text }
-      ],
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }],
       model: 'openai',
       seed: Math.floor(Math.random() * 1000000)
     }, {
@@ -189,41 +184,25 @@ async function getAiResponse(text) {
       },
       timeout: 15000
     });
-    
     let reply = res.data;
     if (typeof reply === 'object' && reply.content) reply = reply.content;
-    if (isValidAiResponse(reply)) {
-      return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
-    }
+    if (isValidAiResponse(reply)) return reply.length > 1900 ? reply.slice(0, 1900) + '...' : reply;
   } catch (e) {
     console.error("❌ Pollinations API Error:", e.message);
   }
 
-  // 3️⃣ API ฟรีสำรองตัวที่ 2 (Hercai AI)
+  // 3️⃣ Hercai (สำรอง 1)
   try {
-    const res = await axios.get(`https://hercai.onrender.com/v3/hercai?question=${encodeURIComponent(fullPromptGET)}`, {
-      timeout: 15000
-    });
-    if (res.data && res.data.reply && isValidAiResponse(res.data.reply)) {
-      return res.data.reply.length > 1900 ? res.data.reply.slice(0, 1900) + '...' : res.data.reply;
-    }
-  } catch (e) {
-    console.error("❌ Hercai API Error:", e.message);
-  }
+    const res = await axios.get(`https://hercai.onrender.com/v3/hercai?question=${encodeURIComponent(fullPromptGET)}`, { timeout: 15000 });
+    if (res.data && res.data.reply && isValidAiResponse(res.data.reply)) return res.data.reply.length > 1900 ? res.data.reply.slice(0, 1900) + '...' : res.data.reply;
+  } catch (e) {}
 
-  // 4️⃣ API ฟรีสำรองตัวที่ 3 (Popcat Chatbot)
+  // 4️⃣ Popcat (สำรอง 2)
   try {
-    const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(safeText)}&owner=Owner&botname=AI`, {
-      timeout: 10000
-    });
-    if (res.data && res.data.response && isValidAiResponse(res.data.response)) {
-      return res.data.response.length > 1900 ? res.data.response.slice(0, 1900) + '...' : res.data.response;
-    }
-  } catch (e) {
-    console.error("❌ Popcat API Error:", e.message);
-  }
+    const res = await axios.get(`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(safeText)}&owner=Owner&botname=AI`, { timeout: 10000 });
+    if (res.data && res.data.response && isValidAiResponse(res.data.response)) return res.data.response.length > 1900 ? res.data.response.slice(0, 1900) + '...' : res.data.response;
+  } catch (e) {}
 
-  // 5️⃣ ข้อความสำรองฉุกเฉิน
   return FALLBACK_ANSWERS[Math.floor(Math.random() * FALLBACK_ANSWERS.length)];
 }
 
@@ -243,9 +222,7 @@ async function changeAvatarFromApi() {
       const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 8000 });
       await client.user.setAvatar(Buffer.from(imgRes.data));
       return { success: true, source: src.name };
-    } catch (e) {
-      continue;
-    }
+    } catch (e) { continue; }
   }
   return { success: false, source: null };
 }
@@ -258,10 +235,13 @@ function startAvatarAutoRotate() {
 }
 
 // ==========================================
-// ⏱️ 6. Cooldown กันสแปม
+// ⏱️ 6. Cooldown (อุดรอยรั่ว Memory Leak)
 // ==========================================
 const cooldownMap = new Map();
 function isOnCooldown(userId) {
+  // ป้องกันเซิร์ฟเวอร์เมมโมรี่ล้น (รีเซ็ตถ้าคนเยอะจัด)
+  if (cooldownMap.size > 1000) cooldownMap.clear(); 
+  
   const last = cooldownMap.get(userId) || 0;
   const now = Date.now();
   if (now - last < cfg.cooldownSeconds * 1000) return true;
@@ -285,14 +265,13 @@ client.once(Events.ClientReady, () => {
   console.log('==========================================');
   console.log(`✅ ล็อกอินสำเร็จ: ${client.user.tag}`);
   console.log(`🔑 คำสั่งเปิดแผงควบคุมคือ: ${PANEL_COMMAND}`);
-  console.log(`👑 เจ้าของบอทที่อนุญาต: ${OWNER_IDS.join(', ')}`);
   console.log('==========================================');
   client.user.setActivity(cfg.statusText, { type: ActivityType.Playing });
   startAvatarAutoRotate();
 });
 
 // ==========================================
-// 🎛️ 8. แผงควบคุม (อุดรอยรั่วความยาวข้อความและเมนู)
+// 🎛️ 8. แผงควบคุม
 // ==========================================
 const fmtChannels = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<#${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกห้อง');
 const fmtRoles = (ids) => (ids && ids.length ? ids.slice(0, 5).map((id) => `<@&${id}>`).join(' ') + (ids.length > 5 ? '...' : '') : 'ทุกคน');
@@ -303,7 +282,7 @@ function buildPanelPayload() {
     ? `📝 Prompt: ${customLen > 50 ? cfg.customPrompt.trim().slice(0, 50) + '...' : cfg.customPrompt.trim()}`
     : `🎭 โหมด: ${MODE_LABELS[cfg.mode] || cfg.mode}`;
     
-  let apiStatus = '🔴 ใช้ระบบฟรีอัตโนมัติ (เสี่ยงโดนบล็อกสูง)';
+  let apiStatus = '🔴 ใช้ระบบฟรีอัตโนมัติ';
   if (cfg.customApiKey && cfg.customApiKey.trim() !== '') {
     const provider = detectApiProvider(cfg.customApiKey);
     apiStatus = `🟢 ใช้ค่าย: **${provider.name}**`;
@@ -340,7 +319,6 @@ function buildPanelPayload() {
   );
 
   const roleMenu = new RoleSelectMenuBuilder().setCustomId('select_roles').setPlaceholder('🎖️ เลือกยศที่ให้บอทตอบ (ไม่เลือก = ทุกคน)').setMinValues(0).setMaxValues(5);
-  // ป้องกันบัค API Limit ถ้าเผลอยัดยศมาเกิน 5 ยศ ให้บังคับตัดเหลือ 5
   if (cfg.targetRoleIds && cfg.targetRoleIds.length > 0) roleMenu.addDefaultRoles(...cfg.targetRoleIds.slice(0, 5));
   const row4 = new ActionRowBuilder().addComponents(roleMenu);
 
@@ -364,13 +342,10 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   if (message.content === PANEL_COMMAND) {
-    if (!hasPerm) {
-      return message.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${message.author.id}\`)` }).catch(() => {});
-    }
+    if (!hasPerm) return message.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${message.author.id}\`)` }).catch(() => {});
     try {
       return await message.reply(buildPanelPayload());
     } catch (err) {
-      console.error('❌ Build Panel Error:', err.message);
       return message.reply('เกิดข้อผิดพลาดในการสร้างแผงควบคุม').catch(() => {});
     }
   }
@@ -389,7 +364,6 @@ client.on(Events.MessageCreate, async (message) => {
   if (cfg.blacklistUserIds.includes(message.author.id)) return;
   
   if (cfg.targetChannelIds && cfg.targetChannelIds.length > 0 && !cfg.targetChannelIds.includes(message.channel.id)) return;
-  
   if (cfg.targetRoleIds && cfg.targetRoleIds.length > 0) {
     const hasRole = message.member?.roles?.cache?.some((r) => cfg.targetRoleIds.includes(r.id));
     if (!hasRole) return;
@@ -398,31 +372,23 @@ client.on(Events.MessageCreate, async (message) => {
   if (isOnCooldown(message.author.id)) return message.react('⏳').catch(() => {});
 
   await message.channel.sendTyping().catch(() => {});
-  const aiText = await getAiResponse(message.content);
+  
+  // 🔥 ดึงชื่อเล่นของผู้ใช้ ส่งให้ AI รับรู้ (ดูเนียนเหมือนคนจริง)
+  const userName = message.member?.displayName || message.author.globalName || message.author.username;
+  const aiText = await getAiResponse(message.content, userName);
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`del_${message.author.id}`).setLabel('🗑️ ลบข้อความนี้').setStyle(ButtonStyle.Secondary)
-  );
-
-  await message.reply({ content: aiText, components: [row] }).catch(() => {});
+  // ตอบกลับแบบคลีน 100% ไม่มีปุ่ม ไม่มีปิงเหลือง
+  await message.reply({ 
+    content: aiText, 
+    allowedMentions: { repliedUser: false } 
+  }).catch(() => {});
 });
 
 // ==========================================
-// 🕹️ 10. Interaction Handling (การันตีความปลอดภัยสูงสุดด้วย Type Guards)
+// 🕹️ 10. Interaction Handling (Cleaned Dead Code)
 // ==========================================
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    // แยกส่วนปุ่มลบข้อความก่อน ป้องกันบัค CustomId ผิดปกติ
-    if (interaction.isButton() && interaction.customId.startsWith('del_')) {
-      const ownerId = interaction.customId.split('_')[1];
-      if (interaction.user.id !== ownerId) {
-        return interaction.reply({ content: '❌ คุณไม่ใช่คนถาม ลบไม่ได้!', ephemeral: true }).catch(() => {});
-      }
-      await interaction.deferUpdate().catch(() => {});
-      return interaction.message.delete().catch(() => {}); 
-    }
-
-    // กรองเฉพาะ Custom IDs ของแผงควบคุม ป้องกันบัคชนกับบอทอื่น
     const panelCustomIds = [
       'btn_toggle', 'btn_refresh', 'btn_avatar', 'btn_set_prompt', 'btn_clear_prompt',
       'btn_set_api', 'btn_clear_api', 'select_mode', 'select_roles', 'select_channels', 
@@ -435,7 +401,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์กดแผงควบคุมนี้!', ephemeral: true }).catch(() => {});
     }
 
-    // 🔥 สวิตช์ 1: สำหรับการกดปุ่ม (Buttons)
     if (interaction.isButton()) {
       if (interaction.customId === 'btn_set_prompt') {
         const modal = new ModalBuilder().setCustomId('modal_set_prompt').setTitle('ตั้ง Prompt นิสัยบอทเอง');
@@ -475,7 +440,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 🔥 สวิตช์ 2: สำหรับการเลือกเมนู (Select Menus)
     if (interaction.isAnySelectMenu()) {
       if (interaction.customId === 'select_mode') {
         cfg.mode = interaction.values[0] || 'normal';
@@ -487,7 +451,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // 🔥 สวิตช์ 3: สำหรับหน้าต่างกรอกข้อมูล (Modal Submit)
     if (interaction.isModalSubmit()) {
       if (interaction.customId === 'modal_set_prompt') {
         cfg.customPrompt = interaction.fields.getTextInputValue('prompt_input').trim();
@@ -496,7 +459,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    // เซฟข้อมูล และอัปเดตแผงควบคุม (ดักจับ Error กรณีคนกดรัวๆ)
     saveConfig(); 
     
     if (interaction.customId !== 'btn_avatar' && !interaction.customId.startsWith('btn_set_')) {
@@ -505,9 +467,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-  } catch (err) {
-    console.error('❌ Interaction Error:', err.message);
-  }
+  } catch (err) {}
 });
 
 client.login(TOKEN);
