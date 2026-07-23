@@ -1,7 +1,7 @@
 {
   "name": "discord-ai-autoreply-bot",
   "version": "1.0.0",
-  "description": "บอท Discord ตอบแชทอัตโนมัติด้วย AI พร้อมแผงควบคุม Components V2 แบบเรียลไทม์",
+  "description": "บอท Discord ตอบแชทอัตโนมัติด้วย AI พร้อมแผงควบคุมแบบเรียลไทม์",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
