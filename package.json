@@ -3,8 +3,12 @@
   "version": "2.0.0",
   "description": "Discord AI Bot หลายเซิร์ฟเวอร์ พร้อมแผงควบคุมเต็มรูปแบบ ความจำบทสนทนา สถิติเรียลไทม์ และระบบ AI สำรองหลายค่าย",
   "main": "index.js",
+  "type": "commonjs",
+  "private": true,
   "scripts": {
-    "start": "node index.js"
+    "start": "node deploy-commands.js && node index.js",
+    "dev": "node --watch index.js",
+    "deploy": "node deploy-commands.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -13,6 +17,7 @@
     "axios": "^1.18.1",
     "discord.js": "^14.27.0",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "mongoose": "^8.0.0"
   }
 }
