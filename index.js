@@ -17,11 +17,26 @@ const ai = require('./lib/ai');
 const panels = require('./lib/panels');
 
 const {
-  globalConfig, saveGlobalConfig, DEFAULT_GUILD_CONFIG,
-  getGuildConfig, saveGuildConfig, resetGuildConfig, safeMergeGuildConfig,
-  getLevelData, saveLevelData, resetLevelData, calculateLevel, makeProgressBar, parseRoleRewards,
-  getGiveaways, saveGiveaways, parseDuration,
-  getProphecies, saveProphecies,
+  globalConfig, 
+  saveGlobalConfig, 
+  DEFAULT_GUILD_CONFIG,
+  getGuildConfig, 
+  saveGuildConfig, 
+  resetGuildConfig, 
+  safeMergeGuildConfig,
+  getLevelData, 
+  saveLevelData, 
+  resetLevelData, 
+  calculateLevel, 
+  makeProgressBar, 
+  parseRoleRewards,
+  getGiveaways, 
+  saveGiveaways, 
+  parseDuration, 
+  giveawayCache,
+  getProphecies, 
+  saveProphecies, 
+  propheciesCache,
   MODE_LABELS,
 } = storage;
 
