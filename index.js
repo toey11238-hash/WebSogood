@@ -169,13 +169,14 @@ async function revealProphecy(guildId, messageId) {
   }
 }
 
-// เช็คทุก 30 วินาทีว่ามีคำทำนายไหนครบเวลาผนึกแล้วบ้าง (แบบเดียวกับระบบ Giveaway เพื่อทนต่อการรีสตาร์ทบอท)
+// เช็คทุก 30 วินาทีว่ามีคำทำนายไหนครบเวลาผนึกแล้วบ้าง (ดึงเซิร์ฟเวอร์จาก client แทน cache)
 setInterval(() => {
   const now = Date.now();
-  for (const [guildId, prophecies] of propheciesCache.entries()) {
+  for (const guild of client.guilds.cache.values()) {
+    const prophecies = getProphecies(guild.id);
     for (const [messageId, p] of Object.entries(prophecies)) {
       if (!p.revealed && p.revealTime <= now) {
-        revealProphecy(guildId, messageId).catch(() => {});
+        revealProphecy(guild.id, messageId).catch(() => {});
       }
     }
   }
@@ -595,13 +596,14 @@ async function endGiveaway(guildId, messageId) {
   }
 }
 
-// เช็คทุก 20 วินาทีว่ามีกิจกรรมไหนครบเวลาแล้วบ้าง (ทนต่อการรีสตาร์ทบอท ดีกว่าใช้ setTimeout เดี่ยวๆ ที่จะหายไปเมื่อบอทรีสตาร์ท)
+// เช็คทุก 20 วินาทีว่ามีกิจกรรมไหนครบเวลาแล้วบ้าง (ดึงเซิร์ฟเวอร์จาก client แทน cache)
 setInterval(() => {
   const now = Date.now();
-  for (const [guildId, giveaways] of giveawayCache.entries()) {
+  for (const guild of client.guilds.cache.values()) {
+    const giveaways = getGiveaways(guild.id);
     for (const [messageId, g] of Object.entries(giveaways)) {
       if (!g.ended && g.endTime <= now) {
-        endGiveaway(guildId, messageId).catch(() => {});
+        endGiveaway(guild.id, messageId).catch(() => {});
       }
     }
   }
