@@ -6,7 +6,7 @@
   "type": "commonjs",
   "private": true,
   "scripts": {
-    "start": "node deploy-commands.js && node index.js",
+    "start": "node index.js",
     "dev": "node --watch index.js",
     "deploy": "node deploy-commands.js"
   },
