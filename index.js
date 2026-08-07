@@ -675,7 +675,7 @@ const slashCommandDefs = [
   // ==========================================
   new SlashCommandBuilder()
     .setName('แผงแอดมิน')
-    .setDescription('🎛️ เปิดแผงควบคุมแอดมิน (ตั้งค่า AI / ดูแลเซิร์ฟเวอร์ / Automod / Ticket / Anti-Raid / ระบบชุมชน / เลเวล ฯลฯ)'),
+    .setDescription('🎛️ เปิดแผงควบคุมแอดมิน (AI / เซิร์ฟเวอร์ / Automod / Ticket / Anti-Raid / ชุมชน / เลเวล ฯลฯ)'),
 
   // ==========================================
   // 🧑‍🤝‍🧑 /เมนู — จุดเข้าเดียวสำหรับทุกฟีเจอร์ฝั่งผู้เล่น (แทนที่ /ai /community level ฯลฯ เดิม) — ใช้ได้ทุกคน ไม่ต้องมีสิทธิ์พิเศษ
@@ -1587,35 +1587,56 @@ function buildLeaderboardEmbed(guildId) {
 // ==========================================
 function buildDashboardPayload(guild, cfg) {
   const buttonDefs = [];
+  const categories = []; // { name, items: [label, ...] } — ใช้จัดกลุ่มปุ่มเป็นหมวดในตัว embed กันหน้าแผงดูโล่งๆ
+
+  function addCategory(name) {
+    const cat = { name, items: [] };
+    categories.push(cat);
+    return cat;
+  }
+  function addBtn(cat, customId, label, style = ButtonStyle.Secondary) {
+    buttonDefs.push({ customId, label, style });
+    cat.items.push(`${label}`);
+  }
+
   if (cfg.isActive) {
-    buttonDefs.push({ customId: 'dash_ai_ask', label: '🧠 ถาม AI', style: ButtonStyle.Primary });
-    if (cfg.imageGenEnabled) buttonDefs.push({ customId: 'dash_ai_imagine', label: '🎨 สร้างภาพ', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_ai_reset', label: '🧹 ล้างความจำ AI', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_ai_memory', label: '🧠 AI จำอะไรเกี่ยวกับฉัน', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_ai_council', label: '🏛️ เปิดสภา AI', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_ai_prophecy', label: '🔮 ขอคำทำนาย', style: ButtonStyle.Secondary });
+    const aiCat = addCategory('🧠 ผู้ช่วย AI');
+    addBtn(aiCat, 'dash_ai_ask', '🧠 ถาม AI', ButtonStyle.Primary);
+    if (cfg.imageGenEnabled) addBtn(aiCat, 'dash_ai_imagine', '🎨 สร้างภาพ');
+    addBtn(aiCat, 'dash_ai_reset', '🧹 ล้างความจำ AI');
+    addBtn(aiCat, 'dash_ai_memory', '🧠 AI จำอะไรเกี่ยวกับฉัน');
+    addBtn(aiCat, 'dash_ai_council', '🏛️ เปิดสภา AI');
+    addBtn(aiCat, 'dash_ai_prophecy', '🔮 ขอคำทำนาย');
   }
-  buttonDefs.push({ customId: 'dash_rank', label: '🏅 เลเวลของฉัน', style: ButtonStyle.Secondary });
-  buttonDefs.push({ customId: 'dash_leaderboard', label: '📊 กระดานผู้นำ XP', style: ButtonStyle.Secondary });
-  if (cfg.dreamEnabled) buttonDefs.push({ customId: 'dash_dream', label: '🌙 ความฝันล่าสุด', style: ButtonStyle.Secondary });
+
+  const levelCat = addCategory('🏅 เลเวล & กิจกรรม');
+  addBtn(levelCat, 'dash_rank', '🏅 เลเวลของฉัน');
+  addBtn(levelCat, 'dash_leaderboard', '📊 กระดานผู้นำ XP');
+  if (cfg.dreamEnabled) addBtn(levelCat, 'dash_dream', '🌙 ความฝันล่าสุด');
+
   if (cfg.lawsEnabled) {
-    buttonDefs.push({ customId: 'dash_laws', label: '📜 ธรรมนูญ', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_laws_article', label: '📖 ดูมาตรา', style: ButtonStyle.Secondary });
+    const lawCat = addCategory('📜 ธรรมนูญเซิร์ฟเวอร์');
+    addBtn(lawCat, 'dash_laws', '📜 ดูธรรมนูญทั้งหมด');
+    addBtn(lawCat, 'dash_laws_article', '📖 ดูมาตรา');
   }
+
   if (cfg.relicsEnabled) {
-    buttonDefs.push({ customId: 'dash_relic_inv', label: '🏺 คลังของฉัน', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_relic_top', label: '🏆 อันดับนักล่า', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_relic_gift', label: '🎁 มอบของวิเศษ', style: ButtonStyle.Secondary });
+    const relicCat = addCategory('🏺 ของวิเศษ');
+    addBtn(relicCat, 'dash_relic_inv', '🏺 คลังของฉัน');
+    addBtn(relicCat, 'dash_relic_top', '🏆 อันดับนักล่า');
+    addBtn(relicCat, 'dash_relic_gift', '🎁 มอบของวิเศษ');
   }
+
   if (cfg.courtEnabled) {
-    buttonDefs.push({ customId: 'dash_court_record', label: '⚖️ สถิติศาลของฉัน', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_court_cases', label: '📖 ประวัติคดี', style: ButtonStyle.Secondary });
-    buttonDefs.push({ customId: 'dash_court_file', label: '🧑‍⚖️ ยื่นฟ้องศาล', style: ButtonStyle.Secondary });
+    const courtCat = addCategory('⚖️ ศาลชุมชน');
+    addBtn(courtCat, 'dash_court_record', '⚖️ สถิติศาลของฉัน');
+    addBtn(courtCat, 'dash_court_cases', '📖 ประวัติคดี');
+    addBtn(courtCat, 'dash_court_file', '🧑\u200d⚖️ ยื่นฟ้องศาล');
   }
-  if (cfg.ticketCategoryId) {
-    buttonDefs.push({ customId: 'ticket_open', label: '🎫 เปิด Ticket', style: ButtonStyle.Primary });
-  }
-  buttonDefs.push({ customId: 'dash_help', label: '❓ วิธีใช้งาน', style: ButtonStyle.Secondary });
+
+  const otherCat = addCategory('🔧 อื่นๆ');
+  if (cfg.ticketCategoryId) addBtn(otherCat, 'ticket_open', '🎫 เปิด Ticket', ButtonStyle.Primary);
+  addBtn(otherCat, 'dash_help', '❓ วิธีใช้งาน');
 
   const rows = [];
   for (let i = 0; i < buttonDefs.length; i += 5) {
@@ -1624,11 +1645,29 @@ function buildDashboardPayload(guild, cfg) {
     ));
   }
 
+  // แถวสถานะด่วน ให้เห็นภาพรวมเซิร์ฟเวอร์ทันทีโดยไม่ต้องกดอะไรเลย
+  const statusFields = [
+    { name: '👥 สมาชิก', value: `${guild.memberCount} คน`, inline: true },
+    { name: '🤖 สถานะ AI', value: cfg.isActive ? '🟢 เปิดใช้งาน' : '🔴 ปิดใช้งาน', inline: true },
+    { name: '🏅 ระบบเลเวล', value: cfg.levelingEnabled ? '🟢 เปิดใช้งาน' : '⚪ ปิดใช้งาน', inline: true },
+  ];
+  const categoryFields = categories
+    .filter((c) => c.items.length)
+    .map((c) => ({ name: c.name, value: c.items.join('\n'), inline: true }));
+
+  const iconUrl = guild.iconURL({ size: 256 });
+
   const embed = new EmbedBuilder()
     .setColor(0x5865F2)
-    .setTitle(`🎛️ แผงข้อมูลสมาชิก — ${guild.name}`)
-    .setDescription('กดปุ่มด้านล่างเพื่อดูข้อมูลต่างๆ ของคุณและเซิร์ฟเวอร์ได้เลย ไม่ต้องพิมพ์คำสั่ง')
-    .addFields({ name: 'มีอะไรให้กดบ้าง', value: buttonDefs.map((b) => b.label).join(' • ') })
+    .setAuthor({ name: guild.name, iconURL: iconUrl || undefined })
+    .setTitle('🎛️ แผงเมนูสมาชิก')
+    .setDescription(
+      '**ยินดีต้อนรับ!** ✨ กดปุ่มด้านล่างเพื่อใช้งานฟีเจอร์ต่างๆ ได้เลย ไม่ต้องพิมพ์คำสั่งให้ยุ่งยาก\n' +
+      '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
+    )
+    .addFields(...statusFields, ...categoryFields)
+    .setThumbnail(iconUrl || null)
+    .setFooter({ text: '👥 ทุกคนเห็นแผงนี้ได้ • กดปุ่มของใคร ก็เห็น/ทำเฉพาะของคนนั้นคนเดียว' })
     .setTimestamp();
 
   return { embed, rows };
@@ -1661,7 +1700,7 @@ async function handleSlashCommand(interaction) {
 
   if (commandName === 'เมนู') {
     const { embed, rows } = buildDashboardPayload(interaction.guild, cfg);
-    return interaction.reply({ embeds: [embed], components: rows, ephemeral: true }).catch(() => {});
+    return interaction.reply({ embeds: [embed], components: rows }).catch(() => {});
   }
 
   if (commandName === 'แผงแอดมิน') {
@@ -2387,7 +2426,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === 'dash_ai_prophecy') {
       const modal = new ModalBuilder().setCustomId('modal_dash_ai_prophecy').setTitle('🔮 ขอคำทำนาย');
-      const durationInput = new TextInputBuilder().setCustomId('duration_input').setLabel('นานแค่ไหนกว่าจะเปิดผนึก เช่น 1h, 1d (5นาที-7วัน)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
+      const durationInput = new TextInputBuilder().setCustomId('duration_input').setLabel('ระยะเวลาเปิดผนึก เช่น 1h, 1d (5นาที-7วัน)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
       const topicInput = new TextInputBuilder().setCustomId('topic_input').setLabel('อยากให้ทำนายเรื่องอะไร (ไม่ใส่ = สุ่มเอง)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200);
       modal.addComponents(new ActionRowBuilder().addComponents(durationInput), new ActionRowBuilder().addComponents(topicInput));
       return interaction.showModal(modal).catch(() => {});
