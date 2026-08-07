@@ -51,6 +51,7 @@ const {
 const {
   buildMainPanel, buildAdvancedPanel, buildAccessPanel, buildLevelingPanel, buildWelcomePanel, buildStatsPanel,
   buildAiReplyPayload, buildHelpEmbed, buildImagineEmbed, buildGiveawayEmbed, buildProphecyEmbed,
+  buildAdminHubPanel, buildModerationPanel, buildAutomodPanel, buildTicketPanel, buildAntiraidPanel, buildCommunityAdminPanel,
 } = panels;
 
 // ==========================================
@@ -71,31 +72,6 @@ app.get('/health', (req, res) => {
     guilds: global.__client ? global.__client.guilds.cache.size : 0,
     ready: global.__client ? global.__client.isReady() : false,
   });
-});
-
-app.get('/debug-commands', async (req, res) => {
-  try {
-    if (!global.__client || !global.__client.isReady()) {
-      return res.status(503).json({ error: 'บอทยังไม่พร้อม (ไม่ online)' });
-    }
-    const guilds = global.__client.guilds.cache;
-    const result = {};
-    for (const [guildId, guild] of guilds) {
-      const commands = await guild.commands.fetch(); // ดึงตรงจาก Discord API เท่านั้น ไม่ผ่านแคชใดๆ
-      result[`${guild.name} (${guildId})`] = commands.map((c) => ({
-        id: c.id,
-        name: c.name,
-        options: c.options.map((o) => ({
-          name: o.name,
-          type: o.type, // 1 = Subcommand, 2 = SubcommandGroup
-          subOptions: (o.options || []).map((so) => so.name),
-        })),
-      }));
-    }
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
 });
 
 app.listen(port, '0.0.0.0', () => {
@@ -694,168 +670,19 @@ global.__client = client;
 // ==========================================
 const slashCommandDefs = [
   // ==========================================
-  // 🤖 /bot — คำสั่งเกี่ยวกับตัวบอท: info (panel/avatar/stats/help) + dashboard (setup/refresh)
+  // 🎛️ /แผงแอดมิน — จุดเข้าเดียวสำหรับทุกฟีเจอร์ฝั่งแอดมิน/ดูแลเซิร์ฟเวอร์ (แทนที่ /bot /server /community เดิม)
+  // ไม่มี option เลย เพราะทุกอย่างทำผ่านปุ่ม/เมนู/Modal ในแผงแทน — ดูรายละเอียดการเช็คสิทธิ์แต่ละหมวดได้ใน handleAdminPanelCommand()
   // ==========================================
   new SlashCommandBuilder()
-    .setName('bot')
-    .setDescription('🤖 คำสั่งเกี่ยวกับตัวบอทและแผงข้อมูลสมาชิก')
-    .addSubcommandGroup((group) => group.setName('info').setDescription('คำสั่งพื้นฐานเกี่ยวกับบอท')
-      .addSubcommand((sub) => sub.setName('panel').setDescription('เปิดแผงควบคุมบอท AI (สำหรับเจ้าของบอท/แอดมิน)'))
-      .addSubcommand((sub) => sub.setName('avatar').setDescription('สุ่มเปลี่ยนรูปโปรไฟล์บอท (สำหรับเจ้าของบอท/แอดมิน)'))
-      .addSubcommand((sub) => sub.setName('stats').setDescription('ดูสถิติการใช้งานบอทแบบเรียลไทม์'))
-      .addSubcommand((sub) => sub.setName('help').setDescription('วิธีใช้งานบอท')))
-    .addSubcommandGroup((group) => group.setName('dashboard').setDescription('แผงข้อมูลสมาชิกถาวรแบบกดปุ่ม')
-      .addSubcommand((sub) => sub.setName('setup').setDescription('ดูตัวอย่างแผงก่อนเผยแพร่จริง (ต้องมีสิทธิ์ Manage Server)')
-        .addChannelOption((opt) => opt.setName('ช่อง').setDescription('ห้องที่จะโพสต์แผง (ไม่ใส่ = ห้องนี้)').setRequired(false).addChannelTypes(ChannelType.GuildText)))
-      .addSubcommand((sub) => sub.setName('refresh').setDescription('อัปเดตปุ่มบนแผงที่เผยแพร่ไปแล้ว (ใช้เมื่อเปิด/ปิดระบบเสริมเพิ่มทีหลัง) (ต้องมีสิทธิ์ Manage Server)'))),
+    .setName('แผงแอดมิน')
+    .setDescription('🎛️ เปิดแผงควบคุมแอดมิน (ตั้งค่า AI / ดูแลเซิร์ฟเวอร์ / Automod / Ticket / Anti-Raid / ระบบชุมชน / เลเวล ฯลฯ)'),
 
   // ==========================================
-  // 🧠 /ai — คำสั่งเกี่ยวกับ AI ทั้งหมด: ask, imagine, reset, memory, usage, limit, council, prophecy
+  // 🧑‍🤝‍🧑 /เมนู — จุดเข้าเดียวสำหรับทุกฟีเจอร์ฝั่งผู้เล่น (แทนที่ /ai /community level ฯลฯ เดิม) — ใช้ได้ทุกคน ไม่ต้องมีสิทธิ์พิเศษ
   // ==========================================
   new SlashCommandBuilder()
-    .setName('ai')
-    .setDescription('🧠 คำสั่งเกี่ยวกับ AI ของบอททั้งหมด')
-    .addSubcommand((sub) => sub.setName('ask').setDescription('ถามคำถามกับ AI โดยตรง')
-      .addStringOption((opt) => opt.setName('คำถาม').setDescription('ข้อความที่ต้องการถาม AI').setRequired(true)))
-    .addSubcommand((sub) => sub.setName('imagine').setDescription('สร้างภาพด้วย AI จากคำบรรยาย (ฟรี ไม่ต้องมี API Key)')
-      .addStringOption((opt) => opt.setName('พรอมต์').setDescription('บรรยายภาพที่ต้องการ (พิมพ์เป็นภาษาอังกฤษจะได้ผลลัพธ์ดีกว่า)').setRequired(true)))
-    .addSubcommand((sub) => sub.setName('reset').setDescription('ล้างความจำบทสนทนา + ความทรงจำเกี่ยวกับตัวคุณที่ AI จำไว้ทั้งหมด'))
-    .addSubcommand((sub) => sub.setName('memory').setDescription('ดูว่า AI จำอะไรเกี่ยวกับคุณไว้บ้าง (นิสัย ความสนใจ ความรู้สึกที่มีต่อคุณ)'))
-    .addSubcommand((sub) => sub.setName('usage').setDescription('ดูโควต้าโทเคน AI ที่ใช้ไปวันนี้ของเซิร์ฟเวอร์นี้'))
-    .addSubcommand((sub) => sub.setName('limit').setDescription('ตั้งโควต้าโทเคน AI ต่อวันของเซิร์ฟเวอร์นี้ (ต้องมีสิทธิ์ Manage Server)')
-      .addIntegerOption((opt) => opt.setName('จำนวน').setDescription('จำนวนโทเคนสูงสุดต่อวัน (0 = ไม่จำกัด)').setRequired(true).setMinValue(0)))
-    .addSubcommand((sub) => sub.setName('council').setDescription('🏛️ เปิดสภา AI ให้ 2 บุคลิกของบอทโต้วาทีกันสดๆ พร้อมกรรมการ AI ตัดสิน (ฟีเจอร์พิเศษ)')
-      .addStringOption((opt) => opt.setName('หัวข้อ').setDescription('หัวข้อที่ต้องการให้ AI โต้วาทีกัน').setRequired(true))
-      .addStringOption((opt) => opt.setName('ฝ่ายก').setDescription('เลือกบุคลิกฝ่ายที่ 1 (ไม่เลือก = สุ่ม)').setRequired(false)
-        .addChoices(...Object.entries(MODE_LABELS).map(([value, name]) => ({ name, value }))))
-      .addStringOption((opt) => opt.setName('ฝ่ายข').setDescription('เลือกบุคลิกฝ่ายที่ 2 (ไม่เลือก = สุ่ม)').setRequired(false)
-        .addChoices(...Object.entries(MODE_LABELS).map(([value, name]) => ({ name, value })))))
-    .addSubcommand((sub) => sub.setName('prophecy').setDescription('🔮 ให้บอททำนายเรื่องสนุกๆ ของเซิร์ฟเวอร์ ผนึกไว้แล้วเปิดเผยเองเมื่อครบเวลา (เพื่อความบันเทิงล้วนๆ)')
-      .addStringOption((opt) => opt.setName('ระยะเวลา').setDescription('นานแค่ไหนกว่าจะเปิดผนึก เช่น 1h, 1d (5 นาที - 7 วัน)').setRequired(true))
-      .addStringOption((opt) => opt.setName('เรื่อง').setDescription('อยากให้ทำนายเรื่องอะไร (ไม่ใส่ = ให้บอทสุ่มทำนายเอง)').setRequired(false))),
-
-  // ==========================================
-  // 🛡️ /server — คำสั่งดูแลเซิร์ฟเวอร์ทั้งหมด: mod, automod, ticket, antiraid
-  // ==========================================
-  new SlashCommandBuilder()
-    .setName('server')
-    .setDescription('🛡️ คำสั่งดูแลเซิร์ฟเวอร์ทั้งหมด')
-    .addSubcommandGroup((group) => group.setName('mod').setDescription('kick/ban/timeout/warn/purge')
-      .addSubcommand((sub) => sub.setName('kick').setDescription('เตะสมาชิกออกจากเซิร์ฟเวอร์ (ต้องมีสิทธิ์ Kick Members)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการเตะ').setRequired(true))
-        .addStringOption((opt) => opt.setName('เหตุผล').setDescription('เหตุผลในการเตะ').setRequired(false)))
-      .addSubcommand((sub) => sub.setName('ban').setDescription('แบนสมาชิกออกจากเซิร์ฟเวอร์ (ต้องมีสิทธิ์ Ban Members)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการแบน').setRequired(true))
-        .addStringOption((opt) => opt.setName('เหตุผล').setDescription('เหตุผลในการแบน').setRequired(false))
-        .addIntegerOption((opt) => opt.setName('ลบข้อความ').setDescription('ลบข้อความย้อนหลังกี่วัน (0-7)').setRequired(false).setMinValue(0).setMaxValue(7)))
-      .addSubcommand((sub) => sub.setName('unban').setDescription('ปลดแบนผู้ใช้ด้วย User ID (ต้องมีสิทธิ์ Ban Members)')
-        .addStringOption((opt) => opt.setName('user_id').setDescription('User ID ของผู้ที่ถูกแบน').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('timeout').setDescription('Timeout (ปิดปาก) สมาชิกชั่วคราว (ต้องมีสิทธิ์ Moderate Members)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการ Timeout').setRequired(true))
-        .addStringOption((opt) => opt.setName('ระยะเวลา').setDescription('เช่น 10m, 1h, 1d (สูงสุด 28 วัน)').setRequired(true))
-        .addStringOption((opt) => opt.setName('เหตุผล').setDescription('เหตุผลในการ Timeout').setRequired(false)))
-      .addSubcommand((sub) => sub.setName('untimeout').setDescription('ยกเลิก Timeout ของสมาชิก (ต้องมีสิทธิ์ Moderate Members)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการยกเลิก Timeout').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('warn').setDescription('เตือนสมาชิก (บันทึกประวัติไว้ในระบบ)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการเตือน').setRequired(true))
-        .addStringOption((opt) => opt.setName('เหตุผล').setDescription('เหตุผลในการเตือน').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('warnings').setDescription('ดูประวัติการเตือนของสมาชิก')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการดูประวัติ').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('clearwarnings').setDescription('ล้างประวัติการเตือนทั้งหมดของสมาชิก (ต้องมีสิทธิ์ Moderate Members)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('สมาชิกที่ต้องการล้างประวัติ').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('purge').setDescription('ลบข้อความหลายข้อความในห้องนี้พร้อมกัน (ต้องมีสิทธิ์ Manage Messages)')
-        .addIntegerOption((opt) => opt.setName('จำนวน').setDescription('จำนวนข้อความที่จะลบ (1-100)').setRequired(true).setMinValue(1).setMaxValue(100))))
-    .addSubcommandGroup((group) => group.setName('automod').setDescription('กรองคำต้องห้าม/ลิงก์/สแปมเมนชันอัตโนมัติ')
-      .addSubcommand((sub) => sub.setName('on').setDescription('เปิดใช้งาน Automod'))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งาน Automod'))
-      .addSubcommand((sub) => sub.setName('settings').setDescription('ดูการตั้งค่า Automod ปัจจุบัน'))
-      .addSubcommand((sub) => sub.setName('config').setDescription('ปรับการตั้งค่า Automod')
-        .addStringOption((opt) => opt.setName('บล็อกลิงก์').setDescription('บล็อกลิงก์ทั่วไปในข้อความ').setRequired(false)
-          .addChoices({ name: 'เปิด', value: 'on' }, { name: 'ปิด', value: 'off' }))
-        .addStringOption((opt) => opt.setName('บล็อกลิงก์เชิญ').setDescription('บล็อกลิงก์เชิญ Discord (discord.gg/...)').setRequired(false)
-          .addChoices({ name: 'เปิด', value: 'on' }, { name: 'ปิด', value: 'off' }))
-        .addIntegerOption((opt) => opt.setName('เมนชันสูงสุด').setDescription('จำนวนเมนชันสูงสุดต่อข้อความ (0 = ปิดการตรวจสอบ)').setRequired(false).setMinValue(0).setMaxValue(50))
-        .addStringOption((opt) => opt.setName('การลงโทษ').setDescription('สิ่งที่จะทำเมื่อพบข้อความผิดกฎ').setRequired(false)
-          .addChoices({ name: 'ลบข้อความอย่างเดียว', value: 'delete' }, { name: 'ลบ + บันทึกคำเตือน', value: 'warn' }, { name: 'ลบ + Timeout', value: 'timeout' }))
-        .addIntegerOption((opt) => opt.setName('timeout_วินาที').setDescription('ระยะเวลา Timeout เป็นวินาที (ถ้าเลือกการลงโทษเป็น Timeout)').setRequired(false).setMinValue(5).setMaxValue(2419200)))
-      .addSubcommand((sub) => sub.setName('addword').setDescription('เพิ่มคำต้องห้ามเข้ารายการ')
-        .addStringOption((opt) => opt.setName('คำ').setDescription('คำที่ต้องการเพิ่ม (เพิ่มได้ทีละคำ)').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('removeword').setDescription('ลบคำต้องห้ามออกจากรายการ')
-        .addStringOption((opt) => opt.setName('คำ').setDescription('คำที่ต้องการลบ').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('words').setDescription('ดูรายการคำต้องห้ามทั้งหมด')))
-    .addSubcommandGroup((group) => group.setName('ticket').setDescription('ระบบ Ticket ติดต่อทีมงานแบบส่วนตัว')
-      .addSubcommand((sub) => sub.setName('setup').setDescription('ตั้งค่าและโพสต์ปุ่มเปิด Ticket ในห้องนี้ (ต้องมีสิทธิ์ Manage Server)')
-        .addChannelOption((opt) => opt.setName('หมวดหมู่').setDescription('หมวดหมู่ (Category) ที่จะสร้างช่อง Ticket ไว้ข้างใน').setRequired(true).addChannelTypes(ChannelType.GuildCategory))
-        .addRoleOption((opt) => opt.setName('staff_role').setDescription('ยศทีมงานที่จะเห็น Ticket ทุกอัน').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('close').setDescription('ปิด Ticket ที่กำลังเปิดอยู่ในห้องนี้')))
-    .addSubcommandGroup((group) => group.setName('antiraid').setDescription('ตรวจจับและป้องกันการ Raid เซิร์ฟเวอร์')
-      .addSubcommand((sub) => sub.setName('on').setDescription('เปิดใช้งาน Anti-Raid'))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งาน Anti-Raid'))
-      .addSubcommand((sub) => sub.setName('status').setDescription('ดูสถานะ Anti-Raid ปัจจุบัน'))
-      .addSubcommand((sub) => sub.setName('config').setDescription('ปรับการตั้งค่า Anti-Raid')
-        .addIntegerOption((opt) => opt.setName('จำนวนคนขั้นต่ำ').setDescription('จำนวนคนเข้าร่วมที่ถือว่าผิดปกติ').setRequired(false).setMinValue(3).setMaxValue(200))
-        .addIntegerOption((opt) => opt.setName('ภายในกี่วินาที').setDescription('นับจำนวนคนเข้าร่วมภายในกี่วินาที').setRequired(false).setMinValue(5).setMaxValue(600))
-        .addStringOption((opt) => opt.setName('การดำเนินการ').setDescription('สิ่งที่จะทำเมื่อตรวจพบ raid').setRequired(false)
-          .addChoices(
-            { name: 'แจ้งเตือนอย่างเดียว', value: 'alert' },
-            { name: 'เตะบัญชีใหม่อัตโนมัติ', value: 'kick_new_accounts' },
-            { name: 'ยกระดับ Verification ชั่วคราว', value: 'raise_verification' },
-          ))
-        .addIntegerOption((opt) => opt.setName('อายุบัญชีขั้นต่ำวัน').setDescription('ใช้กับโหมดเตะบัญชีใหม่: บัญชีอายุน้อยกว่านี้ (วัน) จะถูกเตะ').setRequired(false).setMinValue(0).setMaxValue(365)))
-      .addSubcommand((sub) => sub.setName('unlock').setDescription('ปรับ Verification Level กลับเป็นค่าเดิมทันที (ถ้าถูกยกระดับไว้จากโหมด raise_verification)'))),
-
-  // ==========================================
-  // 🌙 /community — ระบบสร้างความมีชีวิตชีวาให้เซิร์ฟเวอร์: dream, laws, relic, court, giveaway, level
-  // ==========================================
-  new SlashCommandBuilder()
-    .setName('community')
-    .setDescription('🌙 ระบบสร้างความมีชีวิตชีวาให้เซิร์ฟเวอร์: ความฝัน/ธรรมนูญ/ของวิเศษ/ศาล/แจกของ/เลเวล')
-    .addSubcommandGroup((group) => group.setName('dream').setDescription('🌙 ความฝันของบอท')
-      .addSubcommand((sub) => sub.setName('setup').setDescription('เปิดใช้งาน + เลือกห้องที่จะโพสต์ความฝันทุกวัน (ต้องมีสิทธิ์ Manage Server)')
-        .addChannelOption((opt) => opt.setName('ช่อง').setDescription('ห้องที่จะให้บอทโพสต์ความฝันประจำวัน').setRequired(true).addChannelTypes(ChannelType.GuildText)))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งานระบบความฝัน (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('now').setDescription('สั่งให้บอทฝันตอนนี้เลย ไม่ต้องรอ (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('view').setDescription('อ่านความฝันล่าสุดของเซิร์ฟเวอร์นี้'))
-      .addSubcommand((sub) => sub.setName('archive').setDescription('ย้อนอ่านความฝันเก่าๆ ของเซิร์ฟเวอร์นี้ (10 รายการล่าสุด)')))
-    .addSubcommandGroup((group) => group.setName('laws').setDescription('📜 ธรรมนูญเซิร์ฟเวอร์')
-      .addSubcommand((sub) => sub.setName('setup').setDescription('เปิดใช้งาน + เลือกห้องประกาศมาตราใหม่ (ไม่บังคับ) (ต้องมีสิทธิ์ Manage Server)')
-        .addChannelOption((opt) => opt.setName('ช่อง').setDescription('ห้องที่จะให้บอทประกาศมาตราใหม่ (ไม่ใส่ = ไม่ประกาศ เก็บไว้ดูผ่านคำสั่งเท่านั้น)').setRequired(false).addChannelTypes(ChannelType.GuildText)))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งานระบบธรรมนูญ (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('book').setDescription('เปิดอ่านธรรมนูญฉบับล่าสุด (15 มาตราล่าสุด)'))
-      .addSubcommand((sub) => sub.setName('article').setDescription('ดูมาตราเฉพาะข้อ')
-        .addIntegerOption((opt) => opt.setName('เลขมาตรา').setDescription('หมายเลขมาตราที่ต้องการดู').setRequired(true).setMinValue(1))))
-    .addSubcommandGroup((group) => group.setName('relic').setDescription('🏺 ล่าของวิเศษจากฝัน')
-      .addSubcommand((sub) => sub.setName('on').setDescription('เปิดใช้งาน (ต้องตั้งค่าห้องความฝันก่อน) (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งาน (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('inventory').setDescription('ดูของวิเศษที่สะสมไว้')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('ดูของสะสมของคนอื่น (ไม่ใส่ = ดูของตัวเอง)').setRequired(false)))
-      .addSubcommand((sub) => sub.setName('top').setDescription('ดูอันดับนักสะสมของวิเศษในเซิร์ฟเวอร์นี้'))
-      .addSubcommand((sub) => sub.setName('gift').setDescription('มอบของวิเศษที่คุณสะสมไว้ให้เพื่อน')
-        .addUserOption((opt) => opt.setName('ผู้รับ').setDescription('คนที่จะได้รับของวิเศษ').setRequired(true))
-        .addIntegerOption((opt) => opt.setName('เลขไอเทม').setDescription('เลขไอเทม (#) ของวิเศษที่คุณครอบครองอยู่').setRequired(true).setMinValue(1))))
-    .addSubcommandGroup((group) => group.setName('court').setDescription('⚖️ ศาลเซิร์ฟเวอร์ (เกมสมมติเพื่อความบันเทิง)')
-      .addSubcommand((sub) => sub.setName('file').setDescription('ยื่นฟ้องสมาชิกอีกคน (ขำๆ ไม่ใช่เรื่องจริง)')
-        .addUserOption((opt) => opt.setName('จำเลย').setDescription('สมาชิกที่คุณจะฟ้อง').setRequired(true))
-        .addStringOption((opt) => opt.setName('ข้อกล่าวหา').setDescription('ข้อกล่าวหาสมมติ (เช่น "ขโมยมุกตลกไปเล่นก่อน")').setRequired(true).setMaxLength(200))
-        .addIntegerOption((opt) => opt.setName('มาตราที่อ้างอิง').setDescription('เลขมาตราจากธรรมนูญเซิร์ฟเวอร์ (ไม่บังคับ)').setRequired(false).setMinValue(1)))
-      .addSubcommand((sub) => sub.setName('record').setDescription('ดูสถิติการขึ้นศาลของสมาชิก')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('ไม่ใส่ = ดูของตัวเอง').setRequired(false)))
-      .addSubcommand((sub) => sub.setName('cases').setDescription('ดูประวัติคดีล่าสุดของเซิร์ฟเวอร์นี้'))
-      .addSubcommand((sub) => sub.setName('on').setDescription('เปิดใช้งานระบบศาล (ต้องมีสิทธิ์ Manage Server)'))
-      .addSubcommand((sub) => sub.setName('off').setDescription('ปิดใช้งานระบบศาล (ต้องมีสิทธิ์ Manage Server)')))
-    .addSubcommandGroup((group) => group.setName('giveaway').setDescription('🎉 จัดกิจกรรมแจกของรางวัล')
-      .addSubcommand((sub) => sub.setName('start').setDescription('เริ่มกิจกรรมแจกของรางวัลใหม่ (แอดมิน/เจ้าของบอท)')
-        .addStringOption((opt) => opt.setName('ระยะเวลา').setDescription('เช่น 30s, 10m, 2h, 1d (สูงสุด 28 วัน)').setRequired(true))
-        .addStringOption((opt) => opt.setName('รางวัล').setDescription('ของรางวัลที่จะแจก').setRequired(true))
-        .addIntegerOption((opt) => opt.setName('ผู้ชนะ').setDescription('จำนวนผู้ชนะ (ค่าเริ่มต้น 1)').setRequired(false).setMinValue(1).setMaxValue(20)))
-      .addSubcommand((sub) => sub.setName('end').setDescription('จบกิจกรรมก่อนเวลาแล้วสุ่มผู้ชนะทันที')
-        .addStringOption((opt) => opt.setName('message_id').setDescription('ID ของข้อความกิจกรรม').setRequired(true)))
-      .addSubcommand((sub) => sub.setName('reroll').setDescription('สุ่มผู้ชนะใหม่ของกิจกรรมที่จบไปแล้ว')
-        .addStringOption((opt) => opt.setName('message_id').setDescription('ID ของข้อความกิจกรรม').setRequired(true))))
-    .addSubcommandGroup((group) => group.setName('level').setDescription('🏆 ระบบเลเวล/XP')
-      .addSubcommand((sub) => sub.setName('rank').setDescription('ดูเลเวลและ XP ของคุณ (หรือของคนอื่น)')
-        .addUserOption((opt) => opt.setName('ผู้ใช้').setDescription('ดูเลเวลของคนอื่น (ไม่ใส่ = ตัวเอง)').setRequired(false)))
-      .addSubcommand((sub) => sub.setName('leaderboard').setDescription('ดูอันดับ XP สูงสุดในเซิร์ฟเวอร์นี้'))),
+    .setName('เมนู')
+    .setDescription('🧑‍🤝‍🧑 เปิดแผงเมนูของคุณ (ถาม AI / สร้างภาพ / เลเวล / ความฝัน / ธรรมนูญ / ของวิเศษ / ศาล ฯลฯ)'),
 ].map((cmd) => cmd.toJSON());
 
 // ==========================================
@@ -872,39 +699,9 @@ const contextMenuCommandDefs = [
 
 async function registerSlashCommandsForGuild(guild) {
   try {
-    const fullGuild = await guild.fetch();
-
-    if (!fullGuild.commands) {
-      throw new Error(
-        `Guild command manager unavailable: ${fullGuild.id}`
-      );
-    }
-
-    const commands = [
-      ...slashCommandDefs,
-      ...contextMenuCommandDefs,
-    ];
-
-    // 🔄 ล้างคำสั่งเก่าของกิลด์นี้ทิ้งก่อน แล้วค่อยลงใหม่ทั้งหมด
-    // สาเหตุ: การ .set() ทับตรงๆ บางครั้ง Discord ไม่ยอม diff/อัปเดต schema ของ subcommand
-    // ที่ซ้อนลึก (subcommand group เดิม -> subcommand ใหม่) ให้ครบ ทำให้ client เห็นคำสั่งเก่าค้างอยู่
-    // การล้างให้เป็น [] ก่อนแล้วค่อยลงใหม่ บังคับให้ Discord ปฏิบัติเป็น "สร้างใหม่ทั้งหมด" แทน "diff merge"
-    await fullGuild.commands.set([]);
-    const registered = await fullGuild.commands.set(commands);
-
-    console.log(
-      `📌 Commands ที่ส่ง Discord (${fullGuild.name}):`,
-      registered.map((command) => command.name).join(', ')
-    );
-
-    return true;
-
-  } catch (error) {
-    console.error(
-      `❌ ลงทะเบียน Slash Command สำหรับ "${guild.name}" ล้มเหลว:`
-    );
-    console.error(error);
-    return false;
+    await guild.commands.set([...slashCommandDefs, ...contextMenuCommandDefs]);
+  } catch (e) {
+    console.error(`⚠️ ลงทะเบียน Slash Command สำหรับ "${guild.name}" ล้มเหลว:`, e.message);
   }
 }
 
@@ -962,11 +759,9 @@ client.once(Events.ClientReady, async () => {
   }
 
   // ลงทะเบียนคำสั่งแบบเฉพาะเซิร์ฟเวอร์ด้วย เพื่อให้ใช้งานได้ทันทีในทุกเซิร์ฟเวอร์ที่มีอยู่แล้ว (ไม่ต้องรอ Global Sync)
-  const guilds = await client.guilds.fetch();
-
-  for (const [, partialGuild] of guilds) {
-    getGuildConfig(partialGuild.id);
-    await registerSlashCommandsForGuild(partialGuild);
+  for (const guild of client.guilds.cache.values()) {
+    getGuildConfig(guild.id);
+    await registerSlashCommandsForGuild(guild);
   }
 });
 
@@ -979,8 +774,8 @@ client.on(Events.GuildCreate, async (guild) => {
       await guild.systemChannel.send({
         content:
           `👋 สวัสดีครับ! ขอบคุณที่เชิญผมเข้าเซิร์ฟเวอร์นี้\n` +
-          `พิมพ์ \`${PANEL_COMMAND}\` หรือใช้คำสั่ง \`/bot info panel\` เพื่อเปิดแผงควบคุมและตั้งค่าบอท (สำหรับแอดมิน/เจ้าของบอทเท่านั้น)\n` +
-          `หรือพิมพ์ \`/bot info help\` เพื่อดูวิธีใช้งานทั้งหมด`,
+          `พิมพ์ \`${PANEL_COMMAND}\` หรือใช้คำสั่ง \`/แผงแอดมิน\` เพื่อเปิดแผงควบคุมและตั้งค่าบอท (สำหรับแอดมิน/ผู้ดูแลเซิร์ฟเวอร์เท่านั้น)\n` +
+          `หรือใช้คำสั่ง \`/เมนู\` เพื่อเปิดเมนูของสมาชิกทั่วไป (ถาม AI, เลเวล, ของวิเศษ, ศาล ฯลฯ)`,
       });
     }
   } catch (e) {
@@ -1507,11 +1302,12 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   if (message.content === PANEL_COMMAND) {
-    if (!hasPerm) {
+    const fakeInteraction = { user: message.author, member: message.member, guildId };
+    if (!hasAnyModPermission(fakeInteraction)) {
       return message.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${message.author.id}\`)` }).catch(() => {});
     }
     try {
-      return await message.reply(buildMainPanel(cfg, message.guild));
+      return await message.reply(buildAdminHubPanel(cfg, message.guild));
     } catch (err) {
       return message.reply('เกิดข้อผิดพลาดในการสร้างแผงควบคุม').catch(() => {});
     }
@@ -1638,7 +1434,18 @@ async function renderPanel(interaction, page, guildId, cfg) {
   else if (page === 'stats') payload = buildStatsPanel(getGuildStats(guildId), interaction.guild);
   else if (page === 'leveling') payload = buildLevelingPanel(cfg, interaction.guild);
   else if (page === 'welcome') payload = buildWelcomePanel(cfg, interaction.guild);
-  else payload = buildMainPanel(cfg, interaction.guild);
+  else if (page === 'hub') payload = buildAdminHubPanel(cfg, interaction.guild);
+  else if (page === 'moderation') payload = buildModerationPanel(cfg, interaction.guild);
+  else if (page === 'automod') payload = buildAutomodPanel(cfg, interaction.guild);
+  else if (page === 'ticket') payload = buildTicketPanel(cfg, interaction.guild);
+  else if (page === 'antiraid') {
+    const windowMs = (cfg.antiRaidWindowSeconds || 30) * 1000;
+    const recentJoins = (raidJoinTimestamps.get(guildId) || []).filter((t) => Date.now() - t < windowMs).length;
+    const isLockedVerification = raidOriginalVerificationLevel.has(guildId);
+    payload = buildAntiraidPanel(cfg, interaction.guild, recentJoins, isLockedVerification);
+  }
+  else if (page === 'community') payload = buildCommunityAdminPanel(cfg, interaction.guild);
+  else payload = buildMainPanel(cfg, interaction.guild); // page === 'main' (หน้าตั้งค่า AI) คือ default
 
   try {
     if (interaction.isModalSubmit() && typeof interaction.isFromMessage === 'function' && !interaction.isFromMessage()) {
@@ -1779,24 +1586,36 @@ function buildLeaderboardEmbed(guildId) {
 // ปุ่มที่โชว์จะปรับตามระบบที่เซิร์ฟเวอร์เปิดใช้งานอยู่จริง (เช็คจาก cfg โดยตรง ไม่ต้องมีหน้าตั้งค่าซ้ำซ้อน)
 // ==========================================
 function buildDashboardPayload(guild, cfg) {
-  const buttonDefs = [
-    { customId: 'dash_rank', label: '🏅 เลเวลของฉัน', style: ButtonStyle.Secondary },
-    { customId: 'dash_leaderboard', label: '📊 กระดานผู้นำ XP', style: ButtonStyle.Secondary },
-    { customId: 'dash_ai_memory', label: '🧠 AI จำอะไรเกี่ยวกับฉัน', style: ButtonStyle.Secondary },
-  ];
+  const buttonDefs = [];
+  if (cfg.isActive) {
+    buttonDefs.push({ customId: 'dash_ai_ask', label: '🧠 ถาม AI', style: ButtonStyle.Primary });
+    if (cfg.imageGenEnabled) buttonDefs.push({ customId: 'dash_ai_imagine', label: '🎨 สร้างภาพ', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_ai_reset', label: '🧹 ล้างความจำ AI', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_ai_memory', label: '🧠 AI จำอะไรเกี่ยวกับฉัน', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_ai_council', label: '🏛️ เปิดสภา AI', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_ai_prophecy', label: '🔮 ขอคำทำนาย', style: ButtonStyle.Secondary });
+  }
+  buttonDefs.push({ customId: 'dash_rank', label: '🏅 เลเวลของฉัน', style: ButtonStyle.Secondary });
+  buttonDefs.push({ customId: 'dash_leaderboard', label: '📊 กระดานผู้นำ XP', style: ButtonStyle.Secondary });
   if (cfg.dreamEnabled) buttonDefs.push({ customId: 'dash_dream', label: '🌙 ความฝันล่าสุด', style: ButtonStyle.Secondary });
-  if (cfg.lawsEnabled) buttonDefs.push({ customId: 'dash_laws', label: '📜 ธรรมนูญ', style: ButtonStyle.Secondary });
+  if (cfg.lawsEnabled) {
+    buttonDefs.push({ customId: 'dash_laws', label: '📜 ธรรมนูญ', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_laws_article', label: '📖 ดูมาตรา', style: ButtonStyle.Secondary });
+  }
   if (cfg.relicsEnabled) {
     buttonDefs.push({ customId: 'dash_relic_inv', label: '🏺 คลังของฉัน', style: ButtonStyle.Secondary });
     buttonDefs.push({ customId: 'dash_relic_top', label: '🏆 อันดับนักล่า', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_relic_gift', label: '🎁 มอบของวิเศษ', style: ButtonStyle.Secondary });
   }
   if (cfg.courtEnabled) {
     buttonDefs.push({ customId: 'dash_court_record', label: '⚖️ สถิติศาลของฉัน', style: ButtonStyle.Secondary });
     buttonDefs.push({ customId: 'dash_court_cases', label: '📖 ประวัติคดี', style: ButtonStyle.Secondary });
+    buttonDefs.push({ customId: 'dash_court_file', label: '🧑‍⚖️ ยื่นฟ้องศาล', style: ButtonStyle.Secondary });
   }
   if (cfg.ticketCategoryId) {
     buttonDefs.push({ customId: 'ticket_open', label: '🎫 เปิด Ticket', style: ButtonStyle.Primary });
   }
+  buttonDefs.push({ customId: 'dash_help', label: '❓ วิธีใช้งาน', style: ButtonStyle.Secondary });
 
   const rows = [];
   for (let i = 0; i < buttonDefs.length; i += 5) {
@@ -1816,918 +1635,367 @@ function buildDashboardPayload(guild, cfg) {
 }
 
 // ==========================================
-// 🗨️ 16. Handler สำหรับ Slash Commands
+// 🕹️ 16. Handler สำหรับ Slash Commands (เหลือแค่ 2 คำสั่ง: /แผงแอดมิน กับ /เมนู — ทุกฟีเจอร์เข้าถึงผ่านปุ่ม/Modal/Select บนแผงแทน)
+// ตรรกะจริงของแต่ละฟีเจอร์ (ถาม AI, สภา AI, ยื่นฟ้อง, เริ่มกิจกรรม ฯลฯ) ถูกย้ายไปเป็นฟังก์ชัน perform*/do* ด้านล่าง
+// เพื่อให้ปุ่ม/Modal/Select ในแผงเรียกใช้ตรรกะเดียวกันได้โดยไม่ต้องเขียนซ้ำ — ดูการเรียกใช้จริงได้ในส่วน 18 (Interaction Handling)
 // ==========================================
+
+// อนุญาตเปิด "แผงแอดมิน" ถ้ามีสิทธิ์ดูแลเซิร์ฟเวอร์ "อย่างน้อยหนึ่งอย่าง" (ไม่จำเป็นต้องเป็นแอดมินเต็มขั้น)
+// เพื่อให้มอดที่มีแค่สิทธิ์ Kick/Ban/Moderate/ManageMessages อย่างเดียว ยังเปิดแผงไปใช้หน้า "ดูแลเซิร์ฟเวอร์" ได้เหมือนเดิม
+// ส่วนหน้าที่ละเอียดอ่อนกว่า (ตั้งค่า AI/automod/antiraid/ระบบชุมชน ฯลฯ) จะเช็คสิทธิ์เฉพาะทางอีกชั้นตอนกดปุ่มในหน้านั้นๆ
+function hasAnyModPermission(interaction) {
+  return checkModPermission(interaction, PermissionFlagsBits.KickMembers)
+    || checkModPermission(interaction, PermissionFlagsBits.BanMembers)
+    || checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)
+    || checkModPermission(interaction, PermissionFlagsBits.ManageMessages)
+    || checkModPermission(interaction, PermissionFlagsBits.ManageGuild);
+}
+
 async function handleSlashCommand(interaction) {
   const { commandName } = interaction;
-
-  // /bot info help ใช้ได้แม้ไม่มี guild context ด้วย (เช่นทัก DM มาถามวิธีใช้ได้) เลยเช็คแยกไว้ก่อนจุดที่บังคับต้องมี guild
-  if (commandName === 'bot' && interaction.options.getSubcommandGroup() === 'info' && interaction.options.getSubcommand() === 'help') {
-    return interaction.reply({ embeds: [buildHelpEmbed(PANEL_COMMAND)], ephemeral: true }).catch(() => {});
-  }
-
   const guildId = interaction.guildId;
   if (!guildId) {
     return interaction.reply({ content: '❌ คำสั่งนี้ใช้ได้เฉพาะในเซิร์ฟเวอร์เท่านั้น', ephemeral: true }).catch(() => {});
   }
-
   const cfg = getGuildConfig(guildId);
 
-  // ==========================================
-  // 🤖 /bot — คำสั่งเกี่ยวกับตัวบอท: กลุ่ม info (panel/avatar/stats/help) + กลุ่ม dashboard (setup/refresh)
-  // ==========================================
-  if (commandName === 'bot') {
-    const group = interaction.options.getSubcommandGroup();
-    const sub = interaction.options.getSubcommand();
-
-    if (group === 'info') {
-      if (sub === 'panel') {
-        if (!checkHasPermission(interaction.user.id, interaction.member, guildId)) {
-          return interaction.reply({ content: `❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้! (ID ของคุณ: \`${interaction.user.id}\`)`, ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply(buildMainPanel(cfg, interaction.guild)).catch(() => {});
-      }
-
-      if (sub === 'avatar') {
-        if (!checkHasPermission(interaction.user.id, interaction.member, guildId)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้!', ephemeral: true }).catch(() => {});
-        }
-        await interaction.deferReply();
-        const r = await changeAvatarFromApi();
-        return interaction.editReply(r.success ? `✅ สำเร็จ! (${r.source})` : '❌ ไม่สำเร็จ ลองใหม่อีกครั้ง').catch(() => {});
-      }
-
-      if (sub === 'stats') {
-        const stats = getGuildStats(guildId);
-        await interaction.reply(buildStatsPanel(stats, interaction.guild)).catch(() => {});
-        try {
-          const msg = await interaction.fetchReply();
-          startStatsAutoRefresh(msg, guildId);
-        } catch (e) {
-          // เงียบไว้
-        }
-        return;
-      }
-      return;
-    }
-
-    if (group === 'dashboard') {
-      if (sub === 'setup') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าแผง Dashboard (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        const targetChannel = interaction.options.getChannel('ช่อง') || interaction.channel;
-        const { embed, rows } = buildDashboardPayload(interaction.guild, cfg);
-        const previewEmbed = EmbedBuilder.from(embed)
-          .setFooter({ text: `👀 นี่คือตัวอย่างเท่านั้น (เห็นแค่คุณคนเดียว) — จะโพสต์ลงห้อง #${targetChannel.name} ก็ต่อเมื่อกดยืนยันด้านล่าง` });
-        const confirmRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`dash_publish_${targetChannel.id}`).setLabel('✅ เผยแพร่ถาวรลงห้องนี้').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId('dash_cancel').setLabel('❌ ยกเลิก').setStyle(ButtonStyle.Danger),
-        );
-        return interaction.reply({ embeds: [previewEmbed], components: [...rows, confirmRow], ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'refresh') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์อัปเดตแผง Dashboard (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        if (!cfg.dashboardChannelId || !cfg.dashboardMessageId) {
-          return interaction.reply({ content: '❌ ยังไม่เคยเผยแพร่แผง Dashboard เลย ใช้ `/bot dashboard setup` ก่อน', ephemeral: true }).catch(() => {});
-        }
-        const channel = await interaction.guild.channels.fetch(cfg.dashboardChannelId).catch(() => null);
-        const message = channel ? await channel.messages.fetch(cfg.dashboardMessageId).catch(() => null) : null;
-        if (!channel || !message) {
-          return interaction.reply({ content: '❌ หาข้อความแผงเดิมไม่เจอ (อาจถูกลบไปแล้ว) ใช้ `/bot dashboard setup` เพื่อเผยแพร่ใหม่', ephemeral: true }).catch(() => {});
-        }
-        const { embed, rows } = buildDashboardPayload(interaction.guild, cfg);
-        await message.edit({ embeds: [embed], components: rows }).catch(() => {});
-        return interaction.reply({ content: `✅ อัปเดตปุ่มบนแผงที่ ${channel} เรียบร้อยแล้ว`, ephemeral: true }).catch(() => {});
-      }
-      return;
-    }
-    return;
+  if (commandName === 'เมนู') {
+    const { embed, rows } = buildDashboardPayload(interaction.guild, cfg);
+    return interaction.reply({ embeds: [embed], components: rows, ephemeral: true }).catch(() => {});
   }
 
-  // ==========================================
-  // 🧠 /ai — คำสั่งเกี่ยวกับ AI ทั้งหมด: ask, imagine, reset, memory, usage, limit, council, prophecy (flat ไม่มีกลุ่ม เพราะชื่อไม่ชนกัน)
-  // ==========================================
-  if (commandName === 'ai') {
-    const sub = interaction.options.getSubcommand();
-
-    if (sub === 'ask') {
-      const question = interaction.options.getString('คำถาม', true);
-
-      if (!cfg.isActive) {
-        return interaction.reply({ content: '🔴 ตอนนี้ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-      }
-      const allowed = cfg.filterMode === 'whitelist'
-        ? cfg.whitelistUserIds.includes(interaction.user.id)
-        : !cfg.blacklistUserIds.includes(interaction.user.id);
-      if (!allowed) {
-        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ใช้งาน AI ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-      }
-      if (cfg.targetChannelIds.length && !cfg.targetChannelIds.includes(interaction.channelId)) {
-        return interaction.reply({ content: '❌ ห้องนี้ไม่ได้รับอนุญาตให้ใช้ AI', ephemeral: true }).catch(() => {});
-      }
-      if (cfg.targetRoleIds.length) {
-        const hasRole = interaction.member?.roles.cache.some((r) => cfg.targetRoleIds.includes(r.id));
-        if (!hasRole) {
-          return interaction.reply({ content: '❌ คุณไม่มียศที่ได้รับอนุญาตให้ใช้ AI', ephemeral: true }).catch(() => {});
-        }
-      }
-      if (isOnCooldown(guildId, interaction.user.id, cfg.cooldownSeconds)) {
-        return interaction.reply({ content: '⏳ ใจเย็นๆ นะ กำลังกันสแปมอยู่ ลองใหม่อีกสักครู่', ephemeral: true }).catch(() => {});
-      }
-      const quotaMsg = checkTokenBudget(guildId, cfg);
-      if (quotaMsg) {
-        return interaction.reply({ content: quotaMsg, ephemeral: true }).catch(() => {});
-      }
-
-      await interaction.deferReply();
-      const stopTyping = startTypingLoop(interaction.channel);
-      try {
-        const history = getConversationHistory(guildId, interaction.user.id, cfg);
-        const userMemory = await storage.getUserMemory(guildId, interaction.user.id).catch(() => null);
-        const cfgForReply = buildCfgWithRelationship(cfg, userMemory?.note);
-        const result = await getAiResponse(cfgForReply, history, question);
-        stopTyping();
-        pushConversationTurn(guildId, interaction.user.id, cfg, question, result.text);
-        recordTokenUsage(guildId, history, question, result.text);
-        maybeUpdateRelationship(guildId, interaction.user.id, cfg).catch(() => {});
-        recordStat(guildId, { userId: interaction.user.id, provider: result.provider, latencyMs: result.latencyMs, error: false });
-        const payload = buildAiReplyPayload(cfg, interaction.user.id, result.text);
-        await interaction.editReply(payload).catch(() => {});
-        if (cfg.logChannelId) {
-          const logEmbed = new EmbedBuilder()
-            .setColor(result.usedFallback ? 0xF1C40F : 0x2ECA53)
-            .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
-            .addFields(
-              { name: '❓ คำถาม (/ai ask)', value: question.slice(0, 1000) || '(ว่าง)' },
-              { name: '💬 คำตอบ', value: (result.text || '').slice(0, 1000) || '(ว่าง)' },
-              { name: '🌐 ค่าย', value: `${result.provider} (${result.latencyMs}ms)`, inline: true },
-              { name: '📌 ห้อง', value: `<#${interaction.channelId}>`, inline: true }
-            )
-            .setTimestamp();
-          sendGuildLog(interaction.guild, cfg, { embeds: [logEmbed] });
-        }
-        return;
-      } catch (err) {
-        stopTyping();
-        recordStat(guildId, { error: true });
-        console.error('❌ /ai ask เกิดข้อผิดพลาด:', err.message);
-        return interaction.editReply('เกิดข้อผิดพลาดบางอย่าง ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
-      }
+  if (commandName === 'แผงแอดมิน') {
+    if (!hasAnyModPermission(interaction)) {
+      return interaction.reply({ content: `❌ คุณไม่มีสิทธิ์เปิดแผงแอดมิน (ต้องมีสิทธิ์ดูแลเซิร์ฟเวอร์อย่างน้อยหนึ่งอย่าง เช่น Manage Server / Kick Members / Ban Members / Moderate Members / Manage Messages — ID ของคุณ: \`${interaction.user.id}\`)`, ephemeral: true }).catch(() => {});
     }
+    return interaction.reply(buildAdminHubPanel(cfg, interaction.guild)).catch(() => {});
+  }
+}
 
-    if (sub === 'imagine') {
-      if (!cfg.imageGenEnabled) {
-        return interaction.reply({ content: '🔴 ระบบสร้างภาพถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-      }
-      if (isOnImageGenCooldown(guildId, interaction.user.id)) {
-        return interaction.reply({ content: `⏳ ใจเย็นๆ นะ กันสแปมอยู่ (${IMAGE_GEN_COOLDOWN_SECONDS} วินาทีต่อครั้ง) ลองใหม่อีกสักครู่`, ephemeral: true }).catch(() => {});
-      }
-      const prompt = interaction.options.getString('พรอมต์', true);
-      await interaction.deferReply();
-      try {
-        const buffer = await generateImage(prompt);
-        const embed = buildImagineEmbed(prompt, interaction.user.tag);
-        return interaction.editReply({ embeds: [embed], files: [{ attachment: buffer, name: 'imagine.png' }] }).catch(() => {});
-      } catch (e) {
-        console.error('❌ /ai imagine เกิดข้อผิดพลาด:', e.message);
-        return interaction.editReply('❌ สร้างภาพไม่สำเร็จ เซิร์ฟเวอร์ภาพอาจกำลังหน่วง ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
-      }
+// ==========================================
+// 🧠 16.1 ฟังก์ชัน perform* ฝั่ง AI (ย้ายมาจาก /ai ask /ai imagine /ai council /ai prophecy เดิม — เรียกจาก Modal ที่เด้งจากปุ่มบน /เมนู)
+// ==========================================
+async function performAiAsk(interaction, cfg, guildId, question) {
+  if (!cfg.isActive) {
+    return interaction.reply({ content: '🔴 ตอนนี้ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
+  }
+  const allowed = cfg.filterMode === 'whitelist'
+    ? cfg.whitelistUserIds.includes(interaction.user.id)
+    : !cfg.blacklistUserIds.includes(interaction.user.id);
+  if (!allowed) {
+    return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ใช้งาน AI ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
+  }
+  if (cfg.targetChannelIds.length && !cfg.targetChannelIds.includes(interaction.channelId)) {
+    return interaction.reply({ content: '❌ ห้องนี้ไม่ได้รับอนุญาตให้ใช้ AI', ephemeral: true }).catch(() => {});
+  }
+  if (cfg.targetRoleIds.length) {
+    const hasRole = interaction.member?.roles.cache.some((r) => cfg.targetRoleIds.includes(r.id));
+    if (!hasRole) {
+      return interaction.reply({ content: '❌ คุณไม่มียศที่ได้รับอนุญาตให้ใช้ AI', ephemeral: true }).catch(() => {});
     }
+  }
+  if (isOnCooldown(guildId, interaction.user.id, cfg.cooldownSeconds)) {
+    return interaction.reply({ content: '⏳ ใจเย็นๆ นะ กำลังกันสแปมอยู่ ลองใหม่อีกสักครู่', ephemeral: true }).catch(() => {});
+  }
+  const quotaMsg = checkTokenBudget(guildId, cfg);
+  if (quotaMsg) {
+    return interaction.reply({ content: quotaMsg, ephemeral: true }).catch(() => {});
+  }
 
-    if (sub === 'reset') {
-      clearConversationHistory(guildId, interaction.user.id);
-      await storage.clearUserMemory(guildId, interaction.user.id).catch(() => {});
-      return interaction.reply({ content: '🧹 ล้างความจำบทสนทนา + ความทรงจำเกี่ยวกับคุณที่ AI จำไว้ทั้งหมดแล้ว! เริ่มคุยใหม่ได้เลย', ephemeral: true }).catch(() => {});
-    }
-
-    if (sub === 'memory') {
-      const embed = await buildUserMemoryEmbed(guildId, interaction.user);
-      if (!embed) {
-        return interaction.reply({ content: '🧠 AI ยังไม่มีความทรงจำเกี่ยวกับคุณเลย ลองคุยกันสักพักก่อนนะ', ephemeral: true }).catch(() => {});
-      }
-      return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
-    }
-
-    if (sub === 'usage') {
-      const usage = getTokenUsage(guildId);
-      const hoursLeft = Math.max(0, Math.ceil((usage.resetAt - Date.now()) / (60 * 60 * 1000)));
-      const limitText = cfg.dailyTokenLimit > 0 ? `${cfg.dailyTokenLimit.toLocaleString()} โทเคน/วัน` : 'ไม่จำกัด';
-      const embed = new EmbedBuilder().setColor(0x3498DB).setTitle('📊 โควต้าโทเคน AI ของเซิร์ฟเวอร์นี้')
+  await interaction.deferReply();
+  const stopTyping = startTypingLoop(interaction.channel);
+  try {
+    const history = getConversationHistory(guildId, interaction.user.id, cfg);
+    const userMemory = await storage.getUserMemory(guildId, interaction.user.id).catch(() => null);
+    const cfgForReply = buildCfgWithRelationship(cfg, userMemory?.note);
+    const result = await getAiResponse(cfgForReply, history, question);
+    stopTyping();
+    pushConversationTurn(guildId, interaction.user.id, cfg, question, result.text);
+    recordTokenUsage(guildId, history, question, result.text);
+    maybeUpdateRelationship(guildId, interaction.user.id, cfg).catch(() => {});
+    recordStat(guildId, { userId: interaction.user.id, provider: result.provider, latencyMs: result.latencyMs, error: false });
+    const payload = buildAiReplyPayload(cfg, interaction.user.id, result.text);
+    await interaction.editReply(payload).catch(() => {});
+    if (cfg.logChannelId) {
+      const logEmbed = new EmbedBuilder()
+        .setColor(result.usedFallback ? 0xF1C40F : 0x2ECA53)
+        .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
         .addFields(
-          { name: 'ใช้ไปวันนี้ (ประมาณการ)', value: `${usage.tokensUsed.toLocaleString()} โทเคน`, inline: true },
-          { name: 'โควต้าที่ตั้งไว้', value: limitText, inline: true },
-          { name: 'รีเซ็ตในอีกประมาณ', value: `${hoursLeft} ชม.`, inline: true },
+          { name: '❓ คำถาม (เมนู → ถาม AI)', value: question.slice(0, 1000) || '(ว่าง)' },
+          { name: '💬 คำตอบ', value: (result.text || '').slice(0, 1000) || '(ว่าง)' },
+          { name: '🌐 ค่าย', value: `${result.provider} (${result.latencyMs}ms)`, inline: true },
+          { name: '📌 ห้อง', value: `<#${interaction.channelId}>`, inline: true }
         )
-        .setFooter({ text: 'ตัวเลขนี้เป็นการประมาณการเท่านั้น ไม่ใช่ตัวเลขจริงจากผู้ให้บริการ AI เป๊ะๆ' });
-      return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+        .setTimestamp();
+      sendGuildLog(interaction.guild, cfg, { embeds: [logEmbed] });
     }
+  } catch (err) {
+    stopTyping();
+    recordStat(guildId, { error: true });
+    console.error('❌ ถาม AI (เมนู) เกิดข้อผิดพลาด:', err.message);
+    await interaction.editReply('เกิดข้อผิดพลาดบางอย่าง ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
+  }
+}
 
-    if (sub === 'limit') {
-      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งโควต้าโทเคน (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-      }
-      const amount = interaction.options.getInteger('จำนวน', true);
-      cfg.dailyTokenLimit = amount;
-      saveGuildConfig(guildId);
-      return interaction.reply({ content: amount > 0 ? `✅ ตั้งโควต้าโทเคน AI เป็น ${amount.toLocaleString()} โทเคน/วันแล้ว` : '✅ ปิดการจำกัดโควต้าโทเคนแล้ว (ไม่จำกัด)', ephemeral: true }).catch(() => {});
-    }
+async function performAiImagine(interaction, cfg, guildId, prompt) {
+  if (!cfg.imageGenEnabled) {
+    return interaction.reply({ content: '🔴 ระบบสร้างภาพถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
+  }
+  if (isOnImageGenCooldown(guildId, interaction.user.id)) {
+    return interaction.reply({ content: `⏳ ใจเย็นๆ นะ กันสแปมอยู่ (${IMAGE_GEN_COOLDOWN_SECONDS} วินาทีต่อครั้ง) ลองใหม่อีกสักครู่`, ephemeral: true }).catch(() => {});
+  }
+  await interaction.deferReply();
+  try {
+    const buffer = await generateImage(prompt);
+    const embed = buildImagineEmbed(prompt, interaction.user.tag);
+    return interaction.editReply({ embeds: [embed], files: [{ attachment: buffer, name: 'imagine.png' }] }).catch(() => {});
+  } catch (e) {
+    console.error('❌ สร้างภาพ (เมนู) เกิดข้อผิดพลาด:', e.message);
+    return interaction.editReply('❌ สร้างภาพไม่สำเร็จ เซิร์ฟเวอร์ภาพอาจกำลังหน่วง ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
+  }
+}
 
-    if (sub === 'council') {
-      if (!cfg.isActive) {
-        return interaction.reply({ content: '🔴 ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-      }
-      if (isOnCouncilCooldown(guildId, interaction.user.id)) {
-        return interaction.reply({ content: `⏳ สภา AI ใช้เวลาประมวลผลนานหน่อย กันสแปมไว้ ${COUNCIL_COOLDOWN_SECONDS} วินาที/ครั้ง ลองใหม่อีกสักครู่นะครับ`, ephemeral: true }).catch(() => {});
-      }
+async function performAiCouncil(interaction, cfg, guildId, topic) {
+  if (!cfg.isActive) {
+    return interaction.reply({ content: '🔴 ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
+  }
+  if (isOnCouncilCooldown(guildId, interaction.user.id)) {
+    return interaction.reply({ content: `⏳ สภา AI ใช้เวลาประมวลผลนานหน่อย กันสแปมไว้ ${COUNCIL_COOLDOWN_SECONDS} วินาที/ครั้ง ลองใหม่อีกสักครู่นะครับ`, ephemeral: true }).catch(() => {});
+  }
+  const allModes = Object.keys(MODE_LABELS);
+  const modeA = allModes[Math.floor(Math.random() * allModes.length)];
+  const remaining = allModes.filter((m) => m !== modeA);
+  const modeB = remaining[Math.floor(Math.random() * remaining.length)];
 
-      const topic = interaction.options.getString('หัวข้อ', true);
-      const allModes = Object.keys(MODE_LABELS);
-      let modeA = interaction.options.getString('ฝ่ายก');
-      let modeB = interaction.options.getString('ฝ่ายข');
-      if (!modeA || !allModes.includes(modeA)) modeA = allModes[Math.floor(Math.random() * allModes.length)];
-      if (!modeB || !allModes.includes(modeB) || modeB === modeA) {
-        const remaining = allModes.filter((m) => m !== modeA);
-        modeB = remaining[Math.floor(Math.random() * remaining.length)];
-      }
+  await interaction.deferReply();
+  const introEmbed = new EmbedBuilder()
+    .setColor(0x1ABC9C)
+    .setTitle('🏛️ เปิดสภา AI!')
+    .setDescription(`หัวข้อ: **${topic}**\n\n🅰️ ${MODE_LABELS[modeA]}\n🆚\n🅱️ ${MODE_LABELS[modeB]}\n\n⏳ กำลังโต้วาที... (อาจใช้เวลาสักครู่)`);
+  await interaction.editReply({ embeds: [introEmbed] }).catch(() => {});
 
-      await interaction.deferReply();
-      const introEmbed = new EmbedBuilder()
-        .setColor(0x1ABC9C)
-        .setTitle('🏛️ เปิดสภา AI!')
-        .setDescription(`หัวข้อ: **${topic}**\n\n🅰️ ${MODE_LABELS[modeA]}\n🆚\n🅱️ ${MODE_LABELS[modeB]}\n\n⏳ กำลังโต้วาที... (อาจใช้เวลาสักครู่)`);
-      await interaction.editReply({ embeds: [introEmbed] }).catch(() => {});
+  try {
+    const transcript = await runCouncilDebate(cfg, topic, modeA, modeB, 3);
+    const lines = transcript.map((t) => {
+      const speakerLabel = t.mode === modeA ? `🅰️ ${MODE_LABELS[modeA]}` : `🅱️ ${MODE_LABELS[modeB]}`;
+      return `**${speakerLabel}**\n${t.text}`;
+    }).join('\n\n').slice(0, 3000);
+    const verdict = (await runCouncilVerdict(cfg, topic, transcript)).slice(0, 500);
 
-      try {
-        const transcript = await runCouncilDebate(cfg, topic, modeA, modeB, 3);
-        const lines = transcript.map((t) => {
-          const speakerLabel = t.mode === modeA ? `🅰️ ${MODE_LABELS[modeA]}` : `🅱️ ${MODE_LABELS[modeB]}`;
-          return `**${speakerLabel}**\n${t.text}`;
-        }).join('\n\n').slice(0, 3000);
-        const verdict = (await runCouncilVerdict(cfg, topic, transcript)).slice(0, 500);
+    const finalEmbed = new EmbedBuilder()
+      .setColor(0x1ABC9C)
+      .setTitle('🏛️ ผลการโต้วาทีสภา AI')
+      .setDescription(`หัวข้อ: **${topic}**\n\n${lines}\n\n⚖️ **คำตัดสิน**\n${verdict}`)
+      .setFooter({ text: `🅰️ ${MODE_LABELS[modeA]}  🆚  🅱️ ${MODE_LABELS[modeB]}` });
+    return interaction.editReply({ embeds: [finalEmbed] }).catch(() => {});
+  } catch (e) {
+    console.error('❌ สภา AI (เมนู) เกิดข้อผิดพลาด:', e.message);
+    return interaction.editReply('❌ เปิดสภาไม่สำเร็จ ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
+  }
+}
 
-        const finalEmbed = new EmbedBuilder()
-          .setColor(0x1ABC9C)
-          .setTitle('🏛️ ผลการโต้วาทีสภา AI')
-          .setDescription(`หัวข้อ: **${topic}**\n\n${lines}\n\n⚖️ **คำตัดสิน**\n${verdict}`)
-          .setFooter({ text: `🅰️ ${MODE_LABELS[modeA]}  🆚  🅱️ ${MODE_LABELS[modeB]}` });
-        return interaction.editReply({ embeds: [finalEmbed] }).catch(() => {});
-      } catch (e) {
-        console.error('❌ /ai council เกิดข้อผิดพลาด:', e.message);
-        return interaction.editReply('❌ เปิดสภาไม่สำเร็จ ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
-      }
-    }
-
-    if (sub === 'prophecy') {
-      if (!cfg.isActive) {
-        return interaction.reply({ content: '🔴 ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-      }
-      if (isOnProphecyCooldown(guildId, interaction.user.id)) {
-        return interaction.reply({ content: `⏳ ใจเย็นๆ นะ กันสแปมไว้ ${PROPHECY_COOLDOWN_SECONDS} วินาที/ครั้ง ลองใหม่อีกสักครู่`, ephemeral: true }).catch(() => {});
-      }
-
-      const durationText = interaction.options.getString('ระยะเวลา', true);
-      const topic = interaction.options.getString('เรื่อง') || '';
-      const durationMs = parseDuration(durationText);
-      const MIN_PROPHECY_MS = 5 * 60 * 1000;
-      const MAX_PROPHECY_MS = 7 * 24 * 60 * 60 * 1000;
-      if (!durationMs || durationMs < MIN_PROPHECY_MS || durationMs > MAX_PROPHECY_MS) {
-        return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `10m` `1h` `1d` (อย่างน้อย 5 นาที สูงสุด 7 วัน)', ephemeral: true }).catch(() => {});
-      }
-
-      await interaction.deferReply();
-      try {
-        const prediction = await generateProphecyText(cfg, topic);
-        const revealTime = Date.now() + durationMs;
-        const embed = buildProphecyEmbed(topic, prediction, revealTime, false, null);
-        await interaction.editReply({ embeds: [embed] });
-        const msg = await interaction.fetchReply();
-
-        const prophecies = getProphecies(guildId);
-        prophecies[msg.id] = {
-          topic, prediction, revealTime, channelId: interaction.channelId, authorId: interaction.user.id, revealed: false, epilogue: null,
-        };
-        saveProphecies(guildId);
-        return;
-      } catch (e) {
-        console.error('❌ /ai prophecy เกิดข้อผิดพลาด:', e.message);
-        return interaction.editReply('❌ ทำนายไม่สำเร็จ ลูกแก้วอาจขุ่นมัวชั่วคราว ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
-      }
-    }
-    return;
+async function performAiProphecy(interaction, cfg, guildId, durationText, topic) {
+  if (!cfg.isActive) {
+    return interaction.reply({ content: '🔴 ระบบ AI ถูกปิดใช้งานอยู่ในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
+  }
+  if (isOnProphecyCooldown(guildId, interaction.user.id)) {
+    return interaction.reply({ content: `⏳ ใจเย็นๆ นะ กันสแปมไว้ ${PROPHECY_COOLDOWN_SECONDS} วินาที/ครั้ง ลองใหม่อีกสักครู่`, ephemeral: true }).catch(() => {});
+  }
+  const durationMs = parseDuration(durationText);
+  const MIN_PROPHECY_MS = 5 * 60 * 1000;
+  const MAX_PROPHECY_MS = 7 * 24 * 60 * 60 * 1000;
+  if (!durationMs || durationMs < MIN_PROPHECY_MS || durationMs > MAX_PROPHECY_MS) {
+    return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `10m` `1h` `1d` (อย่างน้อย 5 นาที สูงสุด 7 วัน)', ephemeral: true }).catch(() => {});
   }
 
-  // ==========================================
-  // 🛡️ /server — คำสั่งดูแลเซิร์ฟเวอร์ทั้งหมด: กลุ่ม mod, automod, ticket, antiraid
-  // ==========================================
-  if (commandName === 'server') {
-    const group = interaction.options.getSubcommandGroup();
-    const sub = interaction.options.getSubcommand();
+  await interaction.deferReply();
+  try {
+    const prediction = await generateProphecyText(cfg, topic);
+    const revealTime = Date.now() + durationMs;
+    const embed = buildProphecyEmbed(topic, prediction, revealTime, false, null);
+    await interaction.editReply({ embeds: [embed] });
+    const msg = await interaction.fetchReply();
 
-    if (group === 'mod') {
-      if (sub === 'kick') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.KickMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เตะสมาชิก (ต้องมีสิทธิ์ Kick Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        const reason = interaction.options.getString('เหตุผล') || 'ไม่ระบุเหตุผล';
-        return doKickAction(interaction, cfg, targetUser.id, reason);
-      }
+    const prophecies = getProphecies(guildId);
+    prophecies[msg.id] = {
+      topic, prediction, revealTime, channelId: interaction.channelId, authorId: interaction.user.id, revealed: false, epilogue: null,
+    };
+    saveProphecies(guildId);
+  } catch (e) {
+    console.error('❌ คำทำนาย (เมนู) เกิดข้อผิดพลาด:', e.message);
+    await interaction.editReply('❌ ทำนายไม่สำเร็จ ลูกแก้วอาจขุ่นมัวชั่วคราว ลองใหม่อีกครั้งนะครับ 🥲').catch(() => {});
+  }
+}
 
-      if (sub === 'ban') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.BanMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์แบนสมาชิก (ต้องมีสิทธิ์ Ban Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        const reason = interaction.options.getString('เหตุผล') || 'ไม่ระบุเหตุผล';
-        const deleteDays = interaction.options.getInteger('ลบข้อความ') || 0;
-        return doBanAction(interaction, cfg, targetUser.id, reason, deleteDays);
-      }
-
-      if (sub === 'unban') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.BanMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปลดแบนสมาชิก (ต้องมีสิทธิ์ Ban Members)', ephemeral: true }).catch(() => {});
-        }
-        const userId = interaction.options.getString('user_id', true).trim();
-        try {
-          await interaction.guild.members.unban(userId);
-          return interaction.reply({ content: `✅ ปลดแบน <@${userId}> เรียบร้อยแล้ว` }).catch(() => {});
-        } catch (e) {
-          return interaction.reply({ content: '❌ ไม่พบผู้ใช้ที่ถูกแบนด้วย ID นี้ หรือเกิดข้อผิดพลาด', ephemeral: true }).catch(() => {});
-        }
-      }
-
-      if (sub === 'timeout') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ Timeout สมาชิก (ต้องมีสิทธิ์ Moderate Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        const durationText = interaction.options.getString('ระยะเวลา', true);
-        const reason = interaction.options.getString('เหตุผล') || 'ไม่ระบุเหตุผล';
-        const durationMs = parseDuration(durationText);
-        const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
-        if (!durationMs || durationMs < 5000 || durationMs > MAX_TIMEOUT_MS) {
-          return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `10m` `1h` `1d` (สูงสุด 28 วัน)', ephemeral: true }).catch(() => {});
-        }
-        return doTimeoutAction(interaction, cfg, targetUser.id, durationMs, durationText, reason);
-      }
-
-      if (sub === 'untimeout') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ยกเลิก Timeout (ต้องมีสิทธิ์ Moderate Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-        if (!targetMember) {
-          return interaction.reply({ content: '❌ ไม่พบผู้ใช้นี้ในเซิร์ฟเวอร์', ephemeral: true }).catch(() => {});
-        }
-        await targetMember.timeout(null).catch(() => {});
-        return interaction.reply({ content: `✅ ยกเลิก Timeout ของ ${targetUser} แล้ว` }).catch(() => {});
-      }
-
-      if (sub === 'warn') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เตือนสมาชิก (ต้องมีสิทธิ์ Moderate Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        const reason = interaction.options.getString('เหตุผล', true);
-        return doWarnAction(interaction, cfg, targetUser.id, reason);
-      }
-
-      if (sub === 'warnings') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ดูประวัติการเตือน (ต้องมีสิทธิ์ Moderate Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        return doWarningsView(interaction, targetUser.id);
-      }
-
-      if (sub === 'clearwarnings') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ModerateMembers)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ล้างประวัติเตือน (ต้องมีสิทธิ์ Moderate Members)', ephemeral: true }).catch(() => {});
-        }
-        const targetUser = interaction.options.getUser('ผู้ใช้', true);
-        await storage.clearWarnings(guildId, targetUser.id);
-        return interaction.reply({ content: `🧹 ล้างประวัติการเตือนของ ${targetUser} แล้ว` }).catch(() => {});
-      }
-
-      if (sub === 'purge') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageMessages)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ลบข้อความ (ต้องมีสิทธิ์ Manage Messages)', ephemeral: true }).catch(() => {});
-        }
-        const amount = interaction.options.getInteger('จำนวน', true);
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          const deleted = await interaction.channel.bulkDelete(amount, true);
-          return interaction.editReply(`🧹 ลบข้อความไปแล้ว ${deleted.size} ข้อความ`).catch(() => {});
-        } catch (e) {
-          return interaction.editReply('❌ ลบข้อความไม่สำเร็จ (ข้อความอาจเก่าเกิน 14 วัน หรือบอทไม่มีสิทธิ์ Manage Messages)').catch(() => {});
-        }
-      }
-      return;
-    }
-
-    if (group === 'automod') {
-      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Automod (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'on' || sub === 'off') {
-        cfg.automodEnabled = sub === 'on';
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: cfg.automodEnabled ? '✅ เปิดใช้งาน Automod แล้ว' : '🔴 ปิดใช้งาน Automod แล้ว', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'settings') {
-        const words = parseWordList(cfg.automodBadWords);
-        const embed = new EmbedBuilder().setColor(0x3498DB).setTitle('🛡️ การตั้งค่า Automod ปัจจุบัน')
-          .addFields(
-            { name: 'สถานะ', value: cfg.automodEnabled ? '🟢 เปิดใช้งาน' : '🔴 ปิดใช้งาน', inline: true },
-            { name: 'บล็อกลิงก์ทั่วไป', value: cfg.automodBlockLinks ? '✅ เปิด' : '❌ ปิด', inline: true },
-            { name: 'บล็อกลิงก์เชิญ Discord', value: cfg.automodBlockInvites ? '✅ เปิด' : '❌ ปิด', inline: true },
-            { name: 'เมนชันสูงสุด/ข้อความ', value: cfg.automodMaxMentions > 0 ? `${cfg.automodMaxMentions}` : 'ปิดการตรวจสอบ', inline: true },
-            { name: 'การลงโทษ', value: { delete: 'ลบข้อความอย่างเดียว', warn: 'ลบ + บันทึกคำเตือน', timeout: `ลบ + Timeout (${cfg.automodTimeoutSeconds}s)` }[cfg.automodAction] || cfg.automodAction, inline: true },
-            { name: `คำต้องห้าม (${words.length})`, value: words.length ? words.slice(0, 20).join(', ') + (words.length > 20 ? ' ...' : '') : '(ยังไม่มี)' },
-          );
-        return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'config') {
-        const blockLinks = interaction.options.getString('บล็อกลิงก์');
-        const blockInvites = interaction.options.getString('บล็อกลิงก์เชิญ');
-        const maxMentions = interaction.options.getInteger('เมนชันสูงสุด');
-        const action = interaction.options.getString('การลงโทษ');
-        const timeoutSeconds = interaction.options.getInteger('timeout_วินาที');
-
-        if (blockLinks !== null) cfg.automodBlockLinks = blockLinks === 'on';
-        if (blockInvites !== null) cfg.automodBlockInvites = blockInvites === 'on';
-        if (maxMentions !== null) cfg.automodMaxMentions = maxMentions;
-        if (action !== null) cfg.automodAction = action;
-        if (timeoutSeconds !== null) cfg.automodTimeoutSeconds = timeoutSeconds;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: '✅ อัปเดตการตั้งค่า Automod แล้ว (ใช้ `/server automod settings` เพื่อดูค่าปัจจุบัน)', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'addword') {
-        const word = interaction.options.getString('คำ', true).trim().toLowerCase();
-        const words = parseWordList(cfg.automodBadWords);
-        if (words.includes(word)) {
-          return interaction.reply({ content: '❌ คำนี้อยู่ในรายการอยู่แล้ว', ephemeral: true }).catch(() => {});
-        }
-        words.push(word);
-        cfg.automodBadWords = words.join(',');
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: `✅ เพิ่มคำต้องห้ามแล้ว (ตอนนี้มีทั้งหมด ${words.length} คำ)`, ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'removeword') {
-        const word = interaction.options.getString('คำ', true).trim().toLowerCase();
-        const words = parseWordList(cfg.automodBadWords).filter((w) => w !== word);
-        cfg.automodBadWords = words.join(',');
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: `🧹 ลบคำต้องห้ามแล้ว (เหลือทั้งหมด ${words.length} คำ)`, ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'words') {
-        const words = parseWordList(cfg.automodBadWords);
-        if (!words.length) {
-          return interaction.reply({ content: '📋 ยังไม่มีคำต้องห้ามในรายการ', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ content: `📋 คำต้องห้ามทั้งหมด (${words.length}): ${words.join(', ')}`, ephemeral: true }).catch(() => {});
-      }
-      return;
-    }
-
-    if (group === 'ticket') {
-      if (sub === 'setup') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Ticket (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        const category = interaction.options.getChannel('หมวดหมู่', true);
-        const staffRole = interaction.options.getRole('staff_role', true);
-        cfg.ticketCategoryId = category.id;
-        cfg.ticketStaffRoleId = staffRole.id;
-        saveGuildConfig(guildId);
-        const setupEmbed = new EmbedBuilder().setColor(0x3498DB).setTitle('🎫 ติดต่อทีมงาน')
-          .setDescription('กดปุ่มด้านล่างเพื่อเปิดช่องแชทส่วนตัวกับทีมงาน — ไม่ต้องพิมพ์คำสั่งใดๆ');
-        const openBtn = new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 เปิด Ticket').setStyle(ButtonStyle.Primary);
-        await interaction.channel.send({ embeds: [setupEmbed], components: [new ActionRowBuilder().addComponents(openBtn)] }).catch(() => {});
-        return interaction.reply({ content: '✅ ตั้งค่าระบบ Ticket และโพสต์ปุ่มเปิด Ticket ในห้องนี้แล้ว', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'close') {
-        if (!interaction.channel?.name?.startsWith('ticket-')) {
-          return interaction.reply({ content: '❌ คำสั่งนี้ใช้ได้เฉพาะในช่อง Ticket เท่านั้น', ephemeral: true }).catch(() => {});
-        }
-        return closeTicketChannel(interaction, cfg, interaction.channel.id);
-      }
-      return;
-    }
-
-    if (group === 'antiraid') {
-      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Anti-Raid (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'on' || sub === 'off') {
-        cfg.antiRaidEnabled = sub === 'on';
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: cfg.antiRaidEnabled ? '✅ เปิดใช้งาน Anti-Raid แล้ว' : '🔴 ปิดใช้งาน Anti-Raid แล้ว', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'status') {
-        const windowMs = (cfg.antiRaidWindowSeconds || 30) * 1000;
-        const recentJoins = (raidJoinTimestamps.get(guildId) || []).filter((t) => Date.now() - t < windowMs).length;
-        const isLockedVerification = raidOriginalVerificationLevel.has(guildId);
-        const actionLabels = { alert: 'แจ้งเตือนอย่างเดียว', kick_new_accounts: 'เตะบัญชีใหม่อัตโนมัติ', raise_verification: 'ยกระดับ Verification ชั่วคราว' };
-        const embed = new EmbedBuilder().setColor(0x3498DB).setTitle('🚨 สถานะ Anti-Raid')
-          .addFields(
-            { name: 'สถานะ', value: cfg.antiRaidEnabled ? '🟢 เปิดใช้งาน' : '🔴 ปิดใช้งาน', inline: true },
-            { name: 'เกณฑ์', value: `${cfg.antiRaidJoinThreshold} คน / ${cfg.antiRaidWindowSeconds} วินาที`, inline: true },
-            { name: 'การดำเนินการ', value: actionLabels[cfg.antiRaidAction] || cfg.antiRaidAction, inline: true },
-            { name: 'อายุบัญชีขั้นต่ำ', value: `${cfg.antiRaidMinAccountAgeDays} วัน`, inline: true },
-            { name: 'คนเข้าร่วมในช่วงเวลาปัจจุบัน', value: `${recentJoins} คน`, inline: true },
-            { name: 'Verification Level', value: isLockedVerification ? '🔒 ถูกยกระดับชั่วคราวอยู่' : '🔓 ปกติ', inline: true },
-          );
-        return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'config') {
-        const threshold = interaction.options.getInteger('จำนวนคนขั้นต่ำ');
-        const windowSeconds = interaction.options.getInteger('ภายในกี่วินาที');
-        const action = interaction.options.getString('การดำเนินการ');
-        const minAge = interaction.options.getInteger('อายุบัญชีขั้นต่ำวัน');
-
-        if (threshold !== null) cfg.antiRaidJoinThreshold = threshold;
-        if (windowSeconds !== null) cfg.antiRaidWindowSeconds = windowSeconds;
-        if (action !== null) cfg.antiRaidAction = action;
-        if (minAge !== null) cfg.antiRaidMinAccountAgeDays = minAge;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: '✅ อัปเดตการตั้งค่า Anti-Raid แล้ว (ใช้ `/server antiraid status` เพื่อดูค่าปัจจุบัน)', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'unlock') {
-        if (!raidOriginalVerificationLevel.has(guildId)) {
-          return interaction.reply({ content: 'ℹ️ ตอนนี้ Verification Level อยู่ในสถานะปกติอยู่แล้ว ไม่มีอะไรให้ปลดล็อก', ephemeral: true }).catch(() => {});
-        }
-        const original = raidOriginalVerificationLevel.get(guildId);
-        raidOriginalVerificationLevel.delete(guildId);
-        await interaction.guild.setVerificationLevel(original, `Anti-Raid: ปลดล็อกด้วยตนเองโดย ${interaction.user.tag}`).catch(() => {});
-        return interaction.reply({ content: '🔓 ปรับ Verification Level กลับเป็นค่าเดิมเรียบร้อยแล้ว', ephemeral: true }).catch(() => {});
-      }
-      return;
-    }
-    return;
+// ==========================================
+// ⚖️ 16.2 ฟังก์ชัน perform* ฝั่งศาล/ของวิเศษ/กิจกรรมแจกของ (ย้ายมาจาก /community เดิม — เรียกจาก Modal/ปุ่มบนแผง)
+// ==========================================
+async function performCourtFile(interaction, cfg, guildId, defendant, accusation, articleRef) {
+  if (!cfg.courtEnabled) {
+    return interaction.reply({ content: '❌ เซิร์ฟเวอร์นี้ยังไม่ได้เปิดระบบศาล (แอดมินต้องเปิดจากแผงแอดมิน → ระบบชุมชน ก่อน)', ephemeral: true }).catch(() => {});
+  }
+  if (defendant.id === interaction.user.id) {
+    return interaction.reply({ content: '❌ ฟ้องตัวเองไม่ได้นะ', ephemeral: true }).catch(() => {});
+  }
+  if (defendant.bot) {
+    return interaction.reply({ content: '❌ ฟ้องบอทไม่ได้ (บอทมีสิทธิคุ้มกันทางการทูต)', ephemeral: true }).catch(() => {});
+  }
+  if (isOnCourtCooldown(guildId, interaction.user.id)) {
+    return interaction.reply({ content: `⏳ คุณเพิ่งยื่นฟ้องไปไม่นาน รอสักครู่ก่อนยื่นฟ้องคดีต่อไปนะ (คูลดาวน์ ${Math.floor(COURT_COOLDOWN_SECONDS / 60)} นาที)`, ephemeral: true }).catch(() => {});
   }
 
-  // ==========================================
-  // 🌙 /community — ระบบสร้างความมีชีวิตชีวาให้เซิร์ฟเวอร์: กลุ่ม dream, laws, relic, court, giveaway, level
-  // ==========================================
-  if (commandName === 'community') {
-    const group = interaction.options.getSubcommandGroup();
-    const sub = interaction.options.getSubcommand();
+  await interaction.deferReply();
 
-    if (group === 'dream') {
-      if (sub === 'setup') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าระบบความฝัน (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        const channel = interaction.options.getChannel('ช่อง', true);
-        cfg.dreamEnabled = true;
-        cfg.dreamChannelId = channel.id;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: `✅ เปิดระบบความฝันแล้ว บอทจะมาโพสต์ความฝันประจำวันที่ ${channel} (ประมาณวันละครั้ง)`, ephemeral: true }).catch(() => {});
-      }
+  let articleText = null;
+  if (articleRef) {
+    const law = await storage.getLawByArticle(guildId, articleRef);
+    if (law) articleText = `มาตราที่ ${law.article}: ${law.content}`;
+  }
 
-      if (sub === 'off') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปิดระบบความฝัน (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        cfg.dreamEnabled = false;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: '🔴 ปิดระบบความฝันแล้ว', ephemeral: true }).catch(() => {});
-      }
+  let verdict;
+  try {
+    verdict = await ai.generateCourtVerdict(cfg, accusation, articleText);
+  } catch (e) {
+    console.error(`❌ ตัดสินคดีของกิลด์ ${guildId} ล้มเหลว:`, e.message);
+    return interaction.editReply('⚖️ ศาลขัดข้องทางเทคนิค เลื่อนการพิจารณาคดีออกไปก่อน ลองใหม่อีกครั้งนะครับ').catch(() => {});
+  }
 
-      if (sub === 'now') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์สั่งให้บอทฝัน (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        await interaction.deferReply({ ephemeral: true });
-        const wasEnabled = cfg.dreamEnabled;
-        cfg.dreamEnabled = true; // เปิดชั่วคราวเผื่อยังไม่เคยตั้งค่าไว้ ให้ generateAndPostDream ทำงานได้
-        await generateAndPostDream(interaction.guild);
-        if (!wasEnabled) cfg.dreamEnabled = false; // ถ้าเดิมปิดอยู่ ให้กลับไปปิดเหมือนเดิม (แค่ทดสอบครั้งนี้ครั้งเดียว)
-        saveGuildConfig(guildId);
-        return interaction.editReply(cfg.dreamChannelId ? `🌙 บอทฝันแล้ว ไปดูได้ที่ <#${cfg.dreamChannelId}> (หรือใช้ \`/community dream view\`)` : '🌙 บอทฝันแล้ว ใช้ `/community dream view` เพื่ออ่าน (ยังไม่ได้ตั้งช่องโพสต์ ใช้ `/community dream setup` เพื่อตั้งค่า)').catch(() => {});
-      }
+  cfg.courtCaseCounter = (cfg.courtCaseCounter || 0) + 1;
+  saveGuildConfig(guildId);
+  await storage.createCourtCase(guildId, cfg.courtCaseCounter, interaction.user.id, defendant.id, accusation, articleRef, verdict.verdictText, verdict.winner);
 
-      if (sub === 'view') {
-        const embed = await buildDreamViewEmbed(guildId);
-        if (!embed) {
-          return interaction.reply({ content: '🌙 เซิร์ฟเวอร์นี้ยังไม่มีความฝันเลย ลองใช้ `/community dream setup` เพื่อเปิดระบบ หรือ `/community dream now` เพื่อทดสอบดูก่อนได้', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
+  const winnerLabel = verdict.winner === 'plaintiff' ? `🏆 โจทก์ (${interaction.user.tag})` : `🏆 จำเลย (${defendant.tag})`;
+  const caseEmbed = new EmbedBuilder().setColor(0x8B4513).setTitle(`⚖️ คดีที่ #${cfg.courtCaseCounter}`)
+    .addFields(
+      { name: '👤 โจทก์', value: `${interaction.user}`, inline: true },
+      { name: '👤 จำเลย', value: `${defendant}`, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      { name: '📋 ข้อกล่าวหา', value: accusation },
+      { name: '🧑‍⚖️ คำตัดสิน', value: verdict.verdictText },
+      { name: 'ผลการตัดสิน', value: winnerLabel },
+    )
+    .setFooter({ text: 'เกมสมมติเพื่อความบันเทิงล้วนๆ ไม่ใช่การกล่าวหาจริง ไม่มีผลใดๆ นอกเกม' })
+    .setTimestamp();
+  return interaction.editReply({ embeds: [caseEmbed] }).catch(() => {});
+}
 
-      if (sub === 'archive') {
-        const dreams = await storage.getDreamArchive(guildId, 10);
-        if (!dreams.length) {
-          return interaction.reply({ content: '📖 ยังไม่มีความฝันในคลังเลย', ephemeral: true }).catch(() => {});
-        }
-        const embed = new EmbedBuilder().setColor(0x9B59B6).setTitle('📖 คลังความฝันของเซิร์ฟเวอร์นี้')
-          .setDescription(dreams.map((d, i) => `**${new Date(d.createdAt).toLocaleDateString('th-TH')}**\n${d.content.length > 200 ? d.content.slice(0, 200) + '...' : d.content}`).join('\n\n'))
-          .setFooter({ text: `${dreams.length} รายการล่าสุด` });
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-      return;
-    }
+async function performRelicGift(interaction, guildId, recipient, article) {
+  if (recipient.id === interaction.user.id) {
+    return interaction.reply({ content: '❌ มอบของวิเศษให้ตัวเองไม่ได้นะ', ephemeral: true }).catch(() => {});
+  }
+  if (recipient.bot) {
+    return interaction.reply({ content: '❌ มอบของวิเศษให้บอทไม่ได้', ephemeral: true }).catch(() => {});
+  }
+  const transferred = await storage.transferRelic(guildId, article, interaction.user.id, recipient.id);
+  if (!transferred) {
+    return interaction.reply({ content: `❌ ไม่พบของวิเศษเลข #${article} ในครอบครองของคุณ (เช็คเลขไอเทมจากปุ่ม "คลังของฉัน")`, ephemeral: true }).catch(() => {});
+  }
+  return interaction.reply({ content: `🎁 มอบ **${transferred.name}** (#${article}) ให้ ${recipient} เรียบร้อยแล้ว!` }).catch(() => {});
+}
 
-    if (group === 'laws') {
-      if (sub === 'setup') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าระบบธรรมนูญ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        const channel = interaction.options.getChannel('ช่อง');
-        cfg.lawsEnabled = true;
-        cfg.lawsChannelId = channel ? channel.id : '';
-        saveGuildConfig(guildId);
-        return interaction.reply({
-          content: channel
-            ? `✅ เปิดระบบธรรมนูญแล้ว มาตราใหม่จะประกาศที่ ${channel} (นานๆ ครั้งเมื่อมีเหตุการณ์ดูแลเซิร์ฟเวอร์เกิดขึ้น)`
-            : '✅ เปิดระบบธรรมนูญแล้ว (ไม่ประกาศอัตโนมัติ ใช้ `/community laws book` เพื่ออ่านได้ตลอด)',
-          ephemeral: true,
-        }).catch(() => {});
-      }
+async function performGiveawayStart(interaction, cfg, guildId, durationText, prize, winnerCount) {
+  const durationMs = parseDuration(durationText);
+  const MAX_GIVEAWAY_MS = 28 * 24 * 60 * 60 * 1000;
+  if (!durationMs || durationMs < 10000 || durationMs > MAX_GIVEAWAY_MS) {
+    return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `30s` `10m` `2h` `1d` (อย่างน้อย 10 วินาที สูงสุด 28 วัน)', ephemeral: true }).catch(() => {});
+  }
+  const endTime = Date.now() + durationMs;
+  const embed = buildGiveawayEmbed(prize, winnerCount, endTime, false, []);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('giveaway_join').setLabel('🎉 เข้าร่วม').setStyle(ButtonStyle.Primary)
+  );
+  await interaction.reply({ embeds: [embed], components: [row] });
+  const msg = await interaction.fetchReply();
 
-      if (sub === 'off') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปิดระบบธรรมนูญ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        cfg.lawsEnabled = false;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: '🔴 ปิดระบบธรรมนูญแล้ว', ephemeral: true }).catch(() => {});
-      }
+  const giveaways = getGiveaways(guildId);
+  giveaways[msg.id] = {
+    prize, winnerCount, entries: [], endTime, channelId: interaction.channelId, ended: false, startedBy: interaction.user.id,
+  };
+  saveGiveaways(guildId);
+}
 
-      if (sub === 'book') {
-        const embed = await buildLawsBookEmbed(guildId, interaction.guild.name, cfg);
-        if (!embed) {
-          return interaction.reply({ content: '📜 เซิร์ฟเวอร์นี้ยังไม่มีธรรมนูญเลย มาตราแรกจะเกิดขึ้นเองเมื่อมีเหตุการณ์ดูแลเซิร์ฟเวอร์ (ใช้ `/community laws setup` เพื่อเปิดระบบก่อน)', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
+async function performGiveawayEnd(interaction, guildId, messageId) {
+  const giveaways = getGiveaways(guildId);
+  if (!giveaways[messageId]) {
+    return interaction.reply({ content: '❌ ไม่พบกิจกรรมที่มี ID นี้', ephemeral: true }).catch(() => {});
+  }
+  if (giveaways[messageId].ended) {
+    return interaction.reply({ content: '❌ กิจกรรมนี้จบไปแล้ว', ephemeral: true }).catch(() => {});
+  }
+  await endGiveaway(guildId, messageId);
+  return interaction.reply({ content: '✅ จบกิจกรรมและประกาศผลเรียบร้อยแล้ว', ephemeral: true }).catch(() => {});
+}
 
-      if (sub === 'article') {
-        const articleNum = interaction.options.getInteger('เลขมาตรา', true);
-        const law = await storage.getLawByArticle(guildId, articleNum);
-        if (!law) {
-          return interaction.reply({ content: `❌ ไม่พบมาตราที่ ${articleNum} (ตอนนี้มีทั้งหมด ${cfg.lawCounter} มาตรา)`, ephemeral: true }).catch(() => {});
-        }
-        const embed = new EmbedBuilder().setColor(0xD4AC0D).setTitle(`📜 มาตราที่ ${law.article}`)
-          .setDescription(law.content)
-          .setFooter({ text: new Date(law.createdAt).toLocaleString('th-TH') });
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-      return;
-    }
+async function performGiveawayReroll(interaction, guildId, messageId) {
+  const giveaways = getGiveaways(guildId);
+  const g = giveaways[messageId];
+  if (!g || !g.ended) {
+    return interaction.reply({ content: '❌ ไม่พบกิจกรรมที่จบแล้วด้วย ID นี้', ephemeral: true }).catch(() => {});
+  }
+  const pool = [...(g.entries || [])];
+  if (!pool.length) {
+    return interaction.reply({ content: '❌ กิจกรรมนี้ไม่มีผู้เข้าร่วมเลย สุ่มใหม่ไม่ได้', ephemeral: true }).catch(() => {});
+  }
+  const winners = [];
+  const winnerCount = Math.min(g.winnerCount, pool.length);
+  for (let i = 0; i < winnerCount; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    winners.push(pool.splice(idx, 1)[0]);
+  }
+  g.winners = winners;
+  saveGiveaways(guildId);
+  if (winners.length) bumpActivity(guildId, 'giveawaysWon', winners.length);
+  const channel = await client.channels.fetch(g.channelId).catch(() => null);
+  if (channel) {
+    await channel.send({ content: `🔄 สุ่มใหม่! ผู้ชนะคนใหม่ของ **${g.prize}** คือ ${winners.map((id) => `<@${id}>`).join(', ')}` }).catch(() => {});
+  }
+  return interaction.reply({ content: '✅ สุ่มผู้ชนะใหม่เรียบร้อยแล้ว', ephemeral: true }).catch(() => {});
+}
 
-    if (group === 'relic') {
-      if (sub === 'on') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เปิดระบบล่าของวิเศษ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        if (!cfg.dreamChannelId) {
-          return interaction.reply({ content: '❌ ต้องตั้งค่าห้องความฝันก่อนด้วย `/community dream setup` เพราะของวิเศษจะหลุดออกมาในห้องเดียวกับความฝัน', ephemeral: true }).catch(() => {});
-        }
-        cfg.relicsEnabled = true;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: `✅ เปิดระบบล่าของวิเศษแล้ว! ทุกคืนที่บอทฝัน จะมีของวิเศษหลุดออกมาให้แย่งคว้าที่ <#${cfg.dreamChannelId}>`, ephemeral: true }).catch(() => {});
-      }
+async function performDreamNow(interaction, cfg, guildId) {
+  await interaction.deferReply({ ephemeral: true });
+  const wasEnabled = cfg.dreamEnabled;
+  cfg.dreamEnabled = true; // เปิดชั่วคราวเผื่อยังไม่เคยตั้งค่าไว้ ให้ generateAndPostDream ทำงานได้
+  await generateAndPostDream(interaction.guild);
+  if (!wasEnabled) cfg.dreamEnabled = false; // ถ้าเดิมปิดอยู่ ให้กลับไปปิดเหมือนเดิม (แค่ทดสอบครั้งนี้ครั้งเดียว)
+  saveGuildConfig(guildId);
+  return interaction.editReply(cfg.dreamChannelId ? `🌙 บอทฝันแล้ว ไปดูได้ที่ <#${cfg.dreamChannelId}> (หรือกด "ความฝันล่าสุด" จาก /เมนู)` : '🌙 บอทฝันแล้ว กด "ความฝันล่าสุด" จาก /เมนู เพื่ออ่าน (ยังไม่ได้ตั้งช่องโพสต์ — ตั้งได้ที่แผงแอดมิน → ระบบชุมชน)').catch(() => {});
+}
 
-      if (sub === 'off') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปิดระบบล่าของวิเศษ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        cfg.relicsEnabled = false;
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: '🔴 ปิดระบบล่าของวิเศษแล้ว', ephemeral: true }).catch(() => {});
-      }
+// ==========================================
+// 🛡️ 16.3 ฟังก์ชัน do* ที่เหลือของฝั่งดูแลเซิร์ฟเวอร์ (ย้ายมาจาก /server mod เดิม)
+// kick/ban/timeout/warn/warnings ใช้ doKickAction/doBanAction/doTimeoutAction/doWarnAction/doWarningsView ที่มีอยู่แล้วโดยตรง (นิยามไว้ด้านบนของไฟล์)
+// ==========================================
+async function doUnbanAction(interaction, userId) {
+  try {
+    await interaction.guild.members.unban(userId);
+    return interaction.reply({ content: `✅ ปลดแบน <@${userId}> เรียบร้อยแล้ว` }).catch(() => {});
+  } catch (e) {
+    return interaction.reply({ content: '❌ ไม่พบผู้ใช้ที่ถูกแบนด้วย ID นี้ หรือเกิดข้อผิดพลาด', ephemeral: true }).catch(() => {});
+  }
+}
 
-      if (sub === 'inventory') {
-        const targetUser = interaction.options.getUser('ผู้ใช้') || interaction.user;
-        const embed = await buildRelicInventoryEmbed(guildId, targetUser);
-        if (!embed) {
-          return interaction.reply({ content: `📦 ${targetUser.id === interaction.user.id ? 'คุณ' : targetUser.tag} ยังไม่มีของวิเศษสะสมเลย รอลุ้นตอนบอทฝันคืนต่อไปได้เลย!`, ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
+async function doUntimeoutAction(interaction, targetUserId) {
+  const targetMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+  if (!targetMember) {
+    return interaction.reply({ content: '❌ ไม่พบผู้ใช้นี้ในเซิร์ฟเวอร์', ephemeral: true }).catch(() => {});
+  }
+  await targetMember.timeout(null).catch(() => {});
+  return interaction.reply({ content: `✅ ยกเลิก Timeout ของ <@${targetUserId}> แล้ว` }).catch(() => {});
+}
 
-      if (sub === 'top') {
-        const embed = await buildRelicLeaderboardEmbed(guildId, interaction.guild.name);
-        if (!embed) {
-          return interaction.reply({ content: '🏺 ยังไม่มีใครคว้าของวิเศษได้เลยในเซิร์ฟเวอร์นี้', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
+async function doClearWarningsAction(interaction, guildId, targetUserId) {
+  await storage.clearWarnings(guildId, targetUserId);
+  return interaction.reply({ content: `🧹 ล้างประวัติการเตือนของ <@${targetUserId}> แล้ว` }).catch(() => {});
+}
 
-      if (sub === 'gift') {
-        const recipient = interaction.options.getUser('ผู้รับ', true);
-        const article = interaction.options.getInteger('เลขไอเทม', true);
-        if (recipient.id === interaction.user.id) {
-          return interaction.reply({ content: '❌ มอบของวิเศษให้ตัวเองไม่ได้นะ', ephemeral: true }).catch(() => {});
-        }
-        if (recipient.bot) {
-          return interaction.reply({ content: '❌ มอบของวิเศษให้บอทไม่ได้', ephemeral: true }).catch(() => {});
-        }
-        const transferred = await storage.transferRelic(guildId, article, interaction.user.id, recipient.id);
-        if (!transferred) {
-          return interaction.reply({ content: `❌ ไม่พบของวิเศษเลข #${article} ในครอบครองของคุณ (เช็คเลขไอเทมด้วย \`/community relic inventory\`)`, ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ content: `🎁 มอบ **${transferred.name}** (#${article}) ให้ ${recipient} เรียบร้อยแล้ว!` }).catch(() => {});
-      }
-      return;
-    }
-
-    if (group === 'court') {
-      if (sub === 'on' || sub === 'off') {
-        if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าระบบศาล (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
-        }
-        cfg.courtEnabled = sub === 'on';
-        saveGuildConfig(guildId);
-        return interaction.reply({ content: cfg.courtEnabled ? '✅ เปิดใช้งานระบบศาลเซิร์ฟเวอร์แล้ว! ใช้ `/community court file` เพื่อยื่นฟ้องได้เลย' : '🔴 ปิดใช้งานระบบศาลแล้ว', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'file') {
-        if (!cfg.courtEnabled) {
-          return interaction.reply({ content: '❌ เซิร์ฟเวอร์นี้ยังไม่ได้เปิดระบบศาล (แอดมินต้องใช้ `/community court on` ก่อน)', ephemeral: true }).catch(() => {});
-        }
-        const defendant = interaction.options.getUser('จำเลย', true);
-        const accusation = interaction.options.getString('ข้อกล่าวหา', true);
-        const articleRef = interaction.options.getInteger('มาตราที่อ้างอิง');
-
-        if (defendant.id === interaction.user.id) {
-          return interaction.reply({ content: '❌ ฟ้องตัวเองไม่ได้นะ', ephemeral: true }).catch(() => {});
-        }
-        if (defendant.bot) {
-          return interaction.reply({ content: '❌ ฟ้องบอทไม่ได้ (บอทมีสิทธิคุ้มกันทางการทูต)', ephemeral: true }).catch(() => {});
-        }
-        if (isOnCourtCooldown(guildId, interaction.user.id)) {
-          return interaction.reply({ content: `⏳ คุณเพิ่งยื่นฟ้องไปไม่นาน รอสักครู่ก่อนยื่นฟ้องคดีต่อไปนะ (คูลดาวน์ ${Math.floor(COURT_COOLDOWN_SECONDS / 60)} นาที)`, ephemeral: true }).catch(() => {});
-        }
-
-        await interaction.deferReply();
-
-        let articleText = null;
-        if (articleRef) {
-          const law = await storage.getLawByArticle(guildId, articleRef);
-          if (law) articleText = `มาตราที่ ${law.article}: ${law.content}`;
-        }
-
-        let verdict;
-        try {
-          verdict = await ai.generateCourtVerdict(cfg, accusation, articleText);
-        } catch (e) {
-          console.error(`❌ ตัดสินคดีของกิลด์ ${guildId} ล้มเหลว:`, e.message);
-          return interaction.editReply('⚖️ ศาลขัดข้องทางเทคนิค เลื่อนการพิจารณาคดีออกไปก่อน ลองใหม่อีกครั้งนะครับ').catch(() => {});
-        }
-
-        cfg.courtCaseCounter = (cfg.courtCaseCounter || 0) + 1;
-        saveGuildConfig(guildId);
-        await storage.createCourtCase(guildId, cfg.courtCaseCounter, interaction.user.id, defendant.id, accusation, articleRef, verdict.verdictText, verdict.winner);
-
-        const winnerLabel = verdict.winner === 'plaintiff' ? `🏆 โจทก์ (${interaction.user.tag})` : `🏆 จำเลย (${defendant.tag})`;
-        const caseEmbed = new EmbedBuilder().setColor(0x8B4513).setTitle(`⚖️ คดีที่ #${cfg.courtCaseCounter}`)
-          .addFields(
-            { name: '👤 โจทก์', value: `${interaction.user}`, inline: true },
-            { name: '👤 จำเลย', value: `${defendant}`, inline: true },
-            { name: '\u200b', value: '\u200b', inline: true },
-            { name: '📋 ข้อกล่าวหา', value: accusation },
-            { name: '🧑‍⚖️ คำตัดสิน', value: verdict.verdictText },
-            { name: 'ผลการตัดสิน', value: winnerLabel },
-          )
-          .setFooter({ text: 'เกมสมมติเพื่อความบันเทิงล้วนๆ ไม่ใช่การกล่าวหาจริง ไม่มีผลใดๆ นอกเกม' })
-          .setTimestamp();
-        return interaction.editReply({ embeds: [caseEmbed] }).catch(() => {});
-      }
-
-      if (sub === 'record') {
-        const targetUser = interaction.options.getUser('ผู้ใช้') || interaction.user;
-        const embed = await buildCourtRecordEmbed(guildId, targetUser);
-        if (!embed) {
-          return interaction.reply({ content: `⚖️ ${targetUser.id === interaction.user.id ? 'คุณ' : targetUser.tag} ยังไม่เคยขึ้นศาลเลย`, ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-
-      if (sub === 'cases') {
-        const embed = await buildCourtCasesEmbed(guildId, interaction.guild.name, cfg);
-        if (!embed) {
-          return interaction.reply({ content: '⚖️ เซิร์ฟเวอร์นี้ยังไม่เคยมีคดีขึ้นศาลเลย', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-      return;
-    }
-
-    if (group === 'giveaway') {
-      if (sub === 'start') {
-        if (!checkHasPermission(interaction.user.id, interaction.member, guildId)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เริ่มกิจกรรมนี้!', ephemeral: true }).catch(() => {});
-        }
-        const durationText = interaction.options.getString('ระยะเวลา', true);
-        const prize = interaction.options.getString('รางวัล', true);
-        const winnerCount = interaction.options.getInteger('ผู้ชนะ') || 1;
-
-        const durationMs = parseDuration(durationText);
-        const MAX_GIVEAWAY_MS = 28 * 24 * 60 * 60 * 1000;
-        if (!durationMs || durationMs < 10000 || durationMs > MAX_GIVEAWAY_MS) {
-          return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `30s` `10m` `2h` `1d` (อย่างน้อย 10 วินาที สูงสุด 28 วัน)', ephemeral: true }).catch(() => {});
-        }
-
-        const endTime = Date.now() + durationMs;
-        const embed = buildGiveawayEmbed(prize, winnerCount, endTime, false, []);
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('giveaway_join').setLabel('🎉 เข้าร่วม').setStyle(ButtonStyle.Primary)
-        );
-        await interaction.reply({ embeds: [embed], components: [row] });
-        const msg = await interaction.fetchReply();
-
-        const giveaways = getGiveaways(guildId);
-        giveaways[msg.id] = {
-          prize, winnerCount, entries: [], endTime, channelId: interaction.channelId, ended: false, startedBy: interaction.user.id,
-        };
-        saveGiveaways(guildId);
-        return;
-      }
-
-      if (sub === 'end') {
-        if (!checkHasPermission(interaction.user.id, interaction.member, guildId)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์จบกิจกรรมนี้!', ephemeral: true }).catch(() => {});
-        }
-        const messageId = interaction.options.getString('message_id', true).trim();
-        const giveaways = getGiveaways(guildId);
-        if (!giveaways[messageId]) {
-          return interaction.reply({ content: '❌ ไม่พบกิจกรรมที่มี ID นี้', ephemeral: true }).catch(() => {});
-        }
-        if (giveaways[messageId].ended) {
-          return interaction.reply({ content: '❌ กิจกรรมนี้จบไปแล้ว', ephemeral: true }).catch(() => {});
-        }
-        await endGiveaway(guildId, messageId);
-        return interaction.reply({ content: '✅ จบกิจกรรมและประกาศผลเรียบร้อยแล้ว', ephemeral: true }).catch(() => {});
-      }
-
-      if (sub === 'reroll') {
-        if (!checkHasPermission(interaction.user.id, interaction.member, guildId)) {
-          return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์สุ่มผู้ชนะใหม่!', ephemeral: true }).catch(() => {});
-        }
-        const messageId = interaction.options.getString('message_id', true).trim();
-        const giveaways = getGiveaways(guildId);
-        const g = giveaways[messageId];
-        if (!g || !g.ended) {
-          return interaction.reply({ content: '❌ ไม่พบกิจกรรมที่จบแล้วด้วย ID นี้', ephemeral: true }).catch(() => {});
-        }
-        const pool = [...(g.entries || [])];
-        if (!pool.length) {
-          return interaction.reply({ content: '❌ กิจกรรมนี้ไม่มีผู้เข้าร่วมเลย สุ่มใหม่ไม่ได้', ephemeral: true }).catch(() => {});
-        }
-        const winners = [];
-        const winnerCount = Math.min(g.winnerCount, pool.length);
-        for (let i = 0; i < winnerCount; i++) {
-          const idx = Math.floor(Math.random() * pool.length);
-          winners.push(pool.splice(idx, 1)[0]);
-        }
-        g.winners = winners;
-        saveGiveaways(guildId);
-        if (winners.length) bumpActivity(guildId, 'giveawaysWon', winners.length);
-        const channel = await client.channels.fetch(g.channelId).catch(() => null);
-        if (channel) {
-          await channel.send({ content: `🔄 สุ่มใหม่! ผู้ชนะคนใหม่ของ **${g.prize}** คือ ${winners.map((id) => `<@${id}>`).join(', ')}` }).catch(() => {});
-        }
-        return interaction.reply({ content: '✅ สุ่มผู้ชนะใหม่เรียบร้อยแล้ว', ephemeral: true }).catch(() => {});
-      }
-      return;
-    }
-
-    if (group === 'level') {
-      if (sub === 'rank') {
-        const targetUser = interaction.options.getUser('ผู้ใช้') || interaction.user;
-        const embed = buildRankEmbed(guildId, targetUser);
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-
-      if (sub === 'leaderboard') {
-        const embed = buildLeaderboardEmbed(guildId);
-        if (!embed) {
-          return interaction.reply({ content: '📉 ยังไม่มีใครมี XP ในเซิร์ฟเวอร์นี้เลย', ephemeral: true }).catch(() => {});
-        }
-        return interaction.reply({ embeds: [embed] }).catch(() => {});
-      }
-      return;
-    }
-    return;
+async function doPurgeAction(interaction, amount) {
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const deleted = await interaction.channel.bulkDelete(amount, true);
+    return interaction.editReply(`🧹 ลบข้อความไปแล้ว ${deleted.size} ข้อความ`).catch(() => {});
+  } catch (e) {
+    return interaction.editReply('❌ ลบข้อความไม่สำเร็จ (ข้อความอาจเก่าเกิน 14 วัน หรือบอทไม่มีสิทธิ์ Manage Messages)').catch(() => {});
   }
 }
 
@@ -3084,6 +2352,629 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
     }
 
+    // ==========================================
+    // 🧑‍🤝‍🧑 18.x ปุ่มฝั่งผู้เล่นบนแผง /เมนู (ถาม AI / สร้างภาพ / ล้างความจำ / สภา AI / คำทำนาย / ดูมาตรา / มอบของวิเศษ / ยื่นฟ้อง / วิธีใช้งาน)
+    // ทุกปุ่มที่นี่ "ใครก็กดได้" (ไม่ต้องมีสิทธิ์แอดมิน) เพราะเป็นฟีเจอร์สำหรับผู้เล่นทั่วไป — ตรรกะจริงถูกเรียกผ่านฟังก์ชัน perform* ที่นิยามไว้ใน 16.1-16.2
+    // ==========================================
+    if (interaction.isButton() && interaction.customId === 'dash_ai_ask') {
+      const modal = new ModalBuilder().setCustomId('modal_dash_ai_ask').setTitle('🧠 ถาม AI');
+      const input = new TextInputBuilder().setCustomId('question_input').setLabel('คำถามของคุณ').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(2000);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_ai_imagine') {
+      const modal = new ModalBuilder().setCustomId('modal_dash_ai_imagine').setTitle('🎨 สร้างภาพด้วย AI');
+      const input = new TextInputBuilder().setCustomId('prompt_input').setLabel('บรรยายภาพที่อยากได้').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_ai_reset') {
+      const rGuildId = interaction.guildId;
+      if (!rGuildId) return;
+      clearConversationHistory(rGuildId, interaction.user.id);
+      await storage.clearUserMemory(rGuildId, interaction.user.id).catch(() => {});
+      return interaction.reply({ content: '🧹 ล้างความจำบทสนทนา + ความทรงจำเกี่ยวกับคุณที่ AI จำไว้ทั้งหมดแล้ว! เริ่มคุยใหม่ได้เลย', ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_ai_council') {
+      const modal = new ModalBuilder().setCustomId('modal_dash_ai_council').setTitle('🏛️ เปิดสภา AI');
+      const input = new TextInputBuilder().setCustomId('topic_input').setLabel('หัวข้อที่ต้องการให้ AI โต้วาทีกัน').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_ai_prophecy') {
+      const modal = new ModalBuilder().setCustomId('modal_dash_ai_prophecy').setTitle('🔮 ขอคำทำนาย');
+      const durationInput = new TextInputBuilder().setCustomId('duration_input').setLabel('นานแค่ไหนกว่าจะเปิดผนึก เช่น 1h, 1d (5นาที-7วัน)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
+      const topicInput = new TextInputBuilder().setCustomId('topic_input').setLabel('อยากให้ทำนายเรื่องอะไร (ไม่ใส่ = สุ่มเอง)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200);
+      modal.addComponents(new ActionRowBuilder().addComponents(durationInput), new ActionRowBuilder().addComponents(topicInput));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_laws_article') {
+      const modal = new ModalBuilder().setCustomId('modal_dash_laws_article').setTitle('📖 ดูมาตรากฎหมาย');
+      const input = new TextInputBuilder().setCustomId('article_input').setLabel('เลขมาตราที่ต้องการดู').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_relic_gift') {
+      const row = new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder().setCustomId('select_dash_relic_gift_target').setPlaceholder('🎁 เลือกเพื่อนที่จะมอบของวิเศษให้').setMinValues(1).setMaxValues(1)
+      );
+      return interaction.reply({ content: 'เลือกเพื่อนที่จะมอบของวิเศษให้:', components: [row], ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'select_dash_relic_gift_target') {
+      const recipientId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`modal_dash_relic_gift_${recipientId}`).setTitle('🎁 มอบของวิเศษ');
+      const input = new TextInputBuilder().setCustomId('article_input').setLabel('เลขไอเทม (#) ของวิเศษที่คุณครอบครองอยู่').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_court_file') {
+      const jGuildId = interaction.guildId;
+      if (!jGuildId) return;
+      const jCfg = getGuildConfig(jGuildId);
+      if (!jCfg.courtEnabled) {
+        return interaction.reply({ content: '❌ เซิร์ฟเวอร์นี้ยังไม่ได้เปิดระบบศาล', ephemeral: true }).catch(() => {});
+      }
+      const row = new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder().setCustomId('select_dash_court_defendant').setPlaceholder('🧑‍⚖️ เลือกจำเลยที่จะฟ้อง').setMinValues(1).setMaxValues(1)
+      );
+      return interaction.reply({ content: 'เลือกสมาชิกที่จะฟ้อง:', components: [row], ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'select_dash_court_defendant') {
+      const defendantId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`modal_dash_court_file_${defendantId}`).setTitle('🧑‍⚖️ ยื่นฟ้องศาล');
+      const accusationInput = new TextInputBuilder().setCustomId('accusation_input').setLabel('ข้อกล่าวหา (ขำๆ ไม่ใช่เรื่องจริง)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200);
+      const articleInput = new TextInputBuilder().setCustomId('article_input').setLabel('เลขมาตราที่อ้างอิง (ไม่บังคับ)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(6);
+      modal.addComponents(new ActionRowBuilder().addComponents(accusationInput), new ActionRowBuilder().addComponents(articleInput));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'dash_help') {
+      return interaction.reply({ embeds: [buildHelpEmbed(PANEL_COMMAND)], ephemeral: true }).catch(() => {});
+    }
+
+    // ---------- Modal submit ของฝั่งผู้เล่น (dash_*) ----------
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_dash_ai_ask') {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const question = interaction.fields.getTextInputValue('question_input').trim();
+      return performAiAsk(interaction, getGuildConfig(mGuildId), mGuildId, question);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_dash_ai_imagine') {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const prompt = interaction.fields.getTextInputValue('prompt_input').trim();
+      return performAiImagine(interaction, getGuildConfig(mGuildId), mGuildId, prompt);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_dash_ai_council') {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const topic = interaction.fields.getTextInputValue('topic_input').trim();
+      return performAiCouncil(interaction, getGuildConfig(mGuildId), mGuildId, topic);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_dash_ai_prophecy') {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const durationText = interaction.fields.getTextInputValue('duration_input').trim();
+      const topic = interaction.fields.getTextInputValue('topic_input').trim();
+      return performAiProphecy(interaction, getGuildConfig(mGuildId), mGuildId, durationText, topic);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_dash_laws_article') {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const mCfg = getGuildConfig(mGuildId);
+      const articleNum = parseInt(interaction.fields.getTextInputValue('article_input').trim(), 10);
+      if (!Number.isFinite(articleNum) || articleNum < 1) {
+        return interaction.reply({ content: '❌ กรุณาใส่หมายเลขมาตราที่ถูกต้อง', ephemeral: true }).catch(() => {});
+      }
+      const law = await storage.getLawByArticle(mGuildId, articleNum);
+      if (!law) {
+        return interaction.reply({ content: `❌ ไม่พบมาตราที่ ${articleNum} (ตอนนี้มีทั้งหมด ${mCfg.lawCounter || 0} มาตรา)`, ephemeral: true }).catch(() => {});
+      }
+      const embed = new EmbedBuilder().setColor(0xD4AC0D).setTitle(`📜 มาตราที่ ${law.article}`)
+        .setDescription(law.content)
+        .setFooter({ text: new Date(law.createdAt).toLocaleString('th-TH') });
+      return interaction.reply({ embeds: [embed], ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_dash_relic_gift_')) {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const recipientId = interaction.customId.replace('modal_dash_relic_gift_', '');
+      const article = parseInt(interaction.fields.getTextInputValue('article_input').trim(), 10);
+      if (!Number.isFinite(article) || article < 1) {
+        return interaction.reply({ content: '❌ กรุณาใส่เลขไอเทมที่ถูกต้อง', ephemeral: true }).catch(() => {});
+      }
+      const recipient = await client.users.fetch(recipientId).catch(() => null);
+      if (!recipient) {
+        return interaction.reply({ content: '❌ ไม่พบผู้ใช้ที่เลือกไว้ ลองใหม่อีกครั้ง', ephemeral: true }).catch(() => {});
+      }
+      return performRelicGift(interaction, mGuildId, recipient, article);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_dash_court_file_')) {
+      const mGuildId = interaction.guildId;
+      if (!mGuildId) return;
+      const defendantId = interaction.customId.replace('modal_dash_court_file_', '');
+      const accusation = interaction.fields.getTextInputValue('accusation_input').trim();
+      const articleRaw = interaction.fields.getTextInputValue('article_input').trim();
+      const articleRef = articleRaw ? parseInt(articleRaw, 10) : null;
+      const defendant = await client.users.fetch(defendantId).catch(() => null);
+      if (!defendant) {
+        return interaction.reply({ content: '❌ ไม่พบผู้ใช้ที่เลือกไว้ ลองใหม่อีกครั้ง', ephemeral: true }).catch(() => {});
+      }
+      return performCourtFile(interaction, getGuildConfig(mGuildId), mGuildId, defendant, accusation, articleRef && Number.isFinite(articleRef) ? articleRef : null);
+    }
+
+    // ==========================================
+    // 🛡️ 18.y ปุ่มดูแลเซิร์ฟเวอร์บนแผงแอดมิน (kick/ban/unban/timeout/untimeout/warn/warnings/clearwarnings/purge)
+    // แต่ละปุ่มเช็คสิทธิ์ Discord เฉพาะทางของตัวเอง (ไม่ใช้ checkHasPermission ทั่วไป) เพื่อให้มอดที่มีแค่สิทธิ์นั้นๆ ใช้งานได้เหมือน /server mod เดิม
+    // ==========================================
+    const modSelectMap = { kick: 'modsel_kick', ban: 'modsel_ban', timeout: 'modsel_timeout', warn: 'modsel_warn', warnings: 'modsel_warnings', clearwarnings: 'modsel_clearwarnings', untimeout: 'modsel_untimeout' };
+    if (interaction.isButton() && interaction.customId.startsWith('btn_mod_') && interaction.customId !== 'btn_mod_unban' && interaction.customId !== 'btn_mod_purge') {
+      const action = interaction.customId.replace('btn_mod_', '');
+      const permMap = {
+        kick: PermissionFlagsBits.KickMembers, ban: PermissionFlagsBits.BanMembers,
+        timeout: PermissionFlagsBits.ModerateMembers, untimeout: PermissionFlagsBits.ModerateMembers,
+        warn: PermissionFlagsBits.ModerateMembers, warnings: PermissionFlagsBits.ModerateMembers, clearwarnings: PermissionFlagsBits.ModerateMembers,
+      };
+      if (!checkModPermission(interaction, permMap[action])) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ทำรายการนี้', ephemeral: true }).catch(() => {});
+      }
+      const row = new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder().setCustomId(modSelectMap[action]).setPlaceholder('เลือกสมาชิกเป้าหมาย').setMinValues(1).setMaxValues(1)
+      );
+      return interaction.reply({ content: 'เลือกสมาชิกเป้าหมาย:', components: [row], ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'btn_mod_unban') {
+      if (!checkModPermission(interaction, PermissionFlagsBits.BanMembers)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปลดแบนสมาชิก (ต้องมีสิทธิ์ Ban Members)', ephemeral: true }).catch(() => {});
+      }
+      const modal = new ModalBuilder().setCustomId('modal_mod_unban').setTitle('🔓 ปลดแบนสมาชิก');
+      const input = new TextInputBuilder().setCustomId('user_id_input').setLabel('User ID ของผู้ที่ถูกแบน').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'btn_mod_purge') {
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageMessages)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ลบข้อความ (ต้องมีสิทธิ์ Manage Messages)', ephemeral: true }).catch(() => {});
+      }
+      const modal = new ModalBuilder().setCustomId('modal_mod_purge').setTitle('🧹 ลบข้อความจำนวนมาก');
+      const input = new TextInputBuilder().setCustomId('amount_input').setLabel('จำนวนข้อความที่จะลบ (1-100)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_kick') {
+      const targetId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`panelmodreason_kick_${targetId}`).setTitle('👢 เตะสมาชิก');
+      const input = new TextInputBuilder().setCustomId('reason_input').setLabel('เหตุผล (ไม่บังคับ)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_ban') {
+      const targetId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`panelmodreason_ban_${targetId}`).setTitle('🔨 แบนสมาชิก');
+      const reasonInput = new TextInputBuilder().setCustomId('reason_input').setLabel('เหตุผล (ไม่บังคับ)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300);
+      const daysInput = new TextInputBuilder().setCustomId('deletedays_input').setLabel('ลบข้อความย้อนหลังกี่วัน (0-7)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(1).setValue('0');
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput), new ActionRowBuilder().addComponents(daysInput));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_timeout') {
+      const targetId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`panelmodreason_timeout_${targetId}`).setTitle('🔇 Timeout สมาชิก');
+      const durationInput = new TextInputBuilder().setCustomId('duration_input').setLabel('ระยะเวลา เช่น 10m, 1h, 1d (สูงสุด 28วัน)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
+      const reasonInput = new TextInputBuilder().setCustomId('reason_input').setLabel('เหตุผล (ไม่บังคับ)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300);
+      modal.addComponents(new ActionRowBuilder().addComponents(durationInput), new ActionRowBuilder().addComponents(reasonInput));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_warn') {
+      const targetId = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`panelmodreason_warn_${targetId}`).setTitle('⚠️ เตือนสมาชิก');
+      const input = new TextInputBuilder().setCustomId('reason_input').setLabel('เหตุผลในการเตือน').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(300);
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_warnings') {
+      return doWarningsView(interaction, interaction.values[0]);
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_clearwarnings') {
+      return doClearWarningsAction(interaction, interaction.guildId, interaction.values[0]);
+    }
+
+    if (interaction.isUserSelectMenu?.() && interaction.customId === 'modsel_untimeout') {
+      return doUntimeoutAction(interaction, interaction.values[0]);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('panelmodreason_')) {
+      const modGuildId = interaction.guildId;
+      if (!modGuildId) return;
+      const modCfg = getGuildConfig(modGuildId);
+      const parts = interaction.customId.split('_'); // panelmodreason, action, targetId
+      const action = parts[1];
+      const targetUserId = parts[2];
+      if (action === 'kick') {
+        const reason = interaction.fields.getTextInputValue('reason_input').trim() || 'ไม่ระบุเหตุผล';
+        return doKickAction(interaction, modCfg, targetUserId, reason);
+      }
+      if (action === 'ban') {
+        const reason = interaction.fields.getTextInputValue('reason_input').trim() || 'ไม่ระบุเหตุผล';
+        const deleteDaysRaw = parseInt(interaction.fields.getTextInputValue('deletedays_input').trim(), 10);
+        const deleteDays = Number.isFinite(deleteDaysRaw) ? Math.min(7, Math.max(0, deleteDaysRaw)) : 0;
+        return doBanAction(interaction, modCfg, targetUserId, reason, deleteDays);
+      }
+      if (action === 'timeout') {
+        const durationText = interaction.fields.getTextInputValue('duration_input').trim();
+        const reason = interaction.fields.getTextInputValue('reason_input').trim() || 'ไม่ระบุเหตุผล';
+        const durationMs = parseDuration(durationText);
+        const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+        if (!durationMs || durationMs < 5000 || durationMs > MAX_TIMEOUT_MS) {
+          return interaction.reply({ content: '❌ ระยะเวลาไม่ถูกต้อง ใช้รูปแบบเช่น `10m` `1h` `1d` (สูงสุด 28 วัน)', ephemeral: true }).catch(() => {});
+        }
+        return doTimeoutAction(interaction, modCfg, targetUserId, durationMs, durationText, reason);
+      }
+      if (action === 'warn') {
+        const reason = interaction.fields.getTextInputValue('reason_input').trim();
+        return doWarnAction(interaction, modCfg, targetUserId, reason);
+      }
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_mod_unban') {
+      if (!checkModPermission(interaction, PermissionFlagsBits.BanMembers)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ปลดแบนสมาชิก', ephemeral: true }).catch(() => {});
+      }
+      const userId = interaction.fields.getTextInputValue('user_id_input').trim();
+      return doUnbanAction(interaction, userId);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_mod_purge') {
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageMessages)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ลบข้อความ', ephemeral: true }).catch(() => {});
+      }
+      const amount = parseInt(interaction.fields.getTextInputValue('amount_input').trim(), 10);
+      if (!Number.isFinite(amount) || amount < 1 || amount > 100) {
+        return interaction.reply({ content: '❌ จำนวนต้องอยู่ระหว่าง 1-100', ephemeral: true }).catch(() => {});
+      }
+      return doPurgeAction(interaction, amount);
+    }
+
+    // ==========================================
+    // 🧭 18.z ปุ่มนำทางหน้าใหม่บนแผงแอดมิน (moderation/automod/ticket/antiraid/community) — เช็คสิทธิ์เฉพาะทางก่อนเข้าหน้า
+    // ==========================================
+    if (interaction.isButton() && interaction.customId === 'nav_moderation') {
+      const nGuildId = interaction.guildId;
+      if (!nGuildId) return;
+      if (!hasAnyModPermission(interaction)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เปิดหน้านี้', ephemeral: true }).catch(() => {});
+      }
+      return renderPanel(interaction, 'moderation', nGuildId, getGuildConfig(nGuildId));
+    }
+    if (interaction.isButton() && ['nav_automod', 'nav_ticket', 'nav_antiraid', 'nav_community'].includes(interaction.customId)) {
+      const nGuildId = interaction.guildId;
+      if (!nGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เปิดหน้านี้ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const pageMap = { nav_automod: 'automod', nav_ticket: 'ticket', nav_antiraid: 'antiraid', nav_community: 'community' };
+      return renderPanel(interaction, pageMap[interaction.customId], nGuildId, getGuildConfig(nGuildId));
+    }
+
+    // ==========================================
+    // 🧹 18.a หน้า Automod บนแผงแอดมิน (ทุกปุ่ม/Modal ต้องมีสิทธิ์ Manage Server เหมือน /server automod เดิม)
+    // ==========================================
+    if ((interaction.isButton() && ['btn_toggle_automod', 'btn_toggle_automod_links', 'btn_toggle_automod_invites', 'btn_set_automod_config', 'btn_set_automod_words'].includes(interaction.customId))
+      || (interaction.isModalSubmit() && ['modal_automod_config', 'modal_automod_words'].includes(interaction.customId))) {
+      const aGuildId = interaction.guildId;
+      if (!aGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Automod (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const aCfg = getGuildConfig(aGuildId);
+
+      if (interaction.customId === 'btn_toggle_automod') {
+        aCfg.automodEnabled = !aCfg.automodEnabled;
+        return renderPanel(interaction, 'automod', aGuildId, aCfg);
+      }
+      if (interaction.customId === 'btn_toggle_automod_links') {
+        aCfg.automodBlockLinks = !aCfg.automodBlockLinks;
+        return renderPanel(interaction, 'automod', aGuildId, aCfg);
+      }
+      if (interaction.customId === 'btn_toggle_automod_invites') {
+        aCfg.automodBlockInvites = !aCfg.automodBlockInvites;
+        return renderPanel(interaction, 'automod', aGuildId, aCfg);
+      }
+      if (interaction.customId === 'btn_set_automod_config') {
+        const modal = new ModalBuilder().setCustomId('modal_automod_config').setTitle('⚙️ ตั้งค่า Automod เพิ่มเติม');
+        const mentionsInput = new TextInputBuilder().setCustomId('mentions_input').setLabel('เมนชันสูงสุด/ข้อความ (0 = ปิด)').setStyle(TextInputStyle.Short).setRequired(false).setValue(String(aCfg.automodMaxMentions ?? 0)).setMaxLength(3);
+        const actionInput = new TextInputBuilder().setCustomId('action_input').setLabel('การลงโทษ: delete / warn / timeout').setStyle(TextInputStyle.Short).setRequired(false).setValue(aCfg.automodAction || 'delete').setMaxLength(10);
+        const timeoutInput = new TextInputBuilder().setCustomId('timeout_input').setLabel('วินาที Timeout (ถ้าเลือกลงโทษเป็น timeout)').setStyle(TextInputStyle.Short).setRequired(false).setValue(String(aCfg.automodTimeoutSeconds || 300)).setMaxLength(7);
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(mentionsInput),
+          new ActionRowBuilder().addComponents(actionInput),
+          new ActionRowBuilder().addComponents(timeoutInput),
+        );
+        return interaction.showModal(modal).catch(() => {});
+      }
+      if (interaction.customId === 'btn_set_automod_words') {
+        const modal = new ModalBuilder().setCustomId('modal_automod_words').setTitle('📋 แก้ไขคำต้องห้าม');
+        const input = new TextInputBuilder().setCustomId('words_input').setLabel('คำต้องห้ามทั้งหมด (คั่นด้วย , )').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(aCfg.automodBadWords || '').setMaxLength(3000);
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        return interaction.showModal(modal).catch(() => {});
+      }
+      if (interaction.customId === 'modal_automod_config') {
+        const mentions = parseInt(interaction.fields.getTextInputValue('mentions_input').trim(), 10);
+        const action = interaction.fields.getTextInputValue('action_input').trim().toLowerCase();
+        const timeoutSeconds = parseInt(interaction.fields.getTextInputValue('timeout_input').trim(), 10);
+        if (Number.isFinite(mentions) && mentions >= 0) aCfg.automodMaxMentions = mentions;
+        if (['delete', 'warn', 'timeout'].includes(action)) aCfg.automodAction = action;
+        if (Number.isFinite(timeoutSeconds) && timeoutSeconds >= 5) aCfg.automodTimeoutSeconds = timeoutSeconds;
+        return renderPanel(interaction, 'automod', aGuildId, aCfg);
+      }
+      if (interaction.customId === 'modal_automod_words') {
+        const raw = interaction.fields.getTextInputValue('words_input').trim();
+        aCfg.automodBadWords = parseWordList(raw).join(',');
+        return renderPanel(interaction, 'automod', aGuildId, aCfg);
+      }
+    }
+
+    // ==========================================
+    // 🎫 18.b หน้า Ticket บนแผงแอดมิน (ต้องมีสิทธิ์ Manage Server เหมือน /server ticket setup เดิม)
+    // ==========================================
+    if ((interaction.isChannelSelectMenu?.() && interaction.customId === 'select_ticket_category')
+      || (interaction.isRoleSelectMenu?.() && interaction.customId === 'select_ticket_staff_role')
+      || (interaction.isButton() && interaction.customId === 'btn_ticket_post')) {
+      const tGuildId = interaction.guildId;
+      if (!tGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Ticket (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const tCfg = getGuildConfig(tGuildId);
+
+      if (interaction.customId === 'select_ticket_category') {
+        tCfg.ticketCategoryId = interaction.values[0] || '';
+        return renderPanel(interaction, 'ticket', tGuildId, tCfg);
+      }
+      if (interaction.customId === 'select_ticket_staff_role') {
+        tCfg.ticketStaffRoleId = interaction.values[0] || '';
+        return renderPanel(interaction, 'ticket', tGuildId, tCfg);
+      }
+      if (interaction.customId === 'btn_ticket_post') {
+        if (!tCfg.ticketCategoryId || !tCfg.ticketStaffRoleId) {
+          return interaction.reply({ content: '❌ ต้องเลือกหมวดหมู่และยศทีมงานให้ครบก่อน', ephemeral: true }).catch(() => {});
+        }
+        const setupEmbed = new EmbedBuilder().setColor(0x3498DB).setTitle('🎫 ติดต่อทีมงาน')
+          .setDescription('กดปุ่มด้านล่างเพื่อเปิดช่องแชทส่วนตัวกับทีมงาน — ไม่ต้องพิมพ์คำสั่งใดๆ');
+        const openBtn = new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 เปิด Ticket').setStyle(ButtonStyle.Primary);
+        await interaction.channel.send({ embeds: [setupEmbed], components: [new ActionRowBuilder().addComponents(openBtn)] }).catch(() => {});
+        return interaction.reply({ content: '✅ โพสต์ปุ่มเปิด Ticket ในห้องนี้แล้ว', ephemeral: true }).catch(() => {});
+      }
+    }
+
+    // ==========================================
+    // 🚨 18.c หน้า Anti-Raid บนแผงแอดมิน (ต้องมีสิทธิ์ Manage Server เหมือน /server antiraid เดิม)
+    // ==========================================
+    if ((interaction.isButton() && ['btn_toggle_antiraid', 'btn_set_antiraid_config', 'btn_antiraid_unlock'].includes(interaction.customId))
+      || (interaction.isStringSelectMenu?.() && interaction.customId === 'select_antiraid_action')
+      || (interaction.isModalSubmit() && interaction.customId === 'modal_antiraid_config')) {
+      const rGuildId = interaction.guildId;
+      if (!rGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่า Anti-Raid (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const rCfg = getGuildConfig(rGuildId);
+
+      if (interaction.customId === 'btn_toggle_antiraid') {
+        rCfg.antiRaidEnabled = !rCfg.antiRaidEnabled;
+        return renderPanel(interaction, 'antiraid', rGuildId, rCfg);
+      }
+      if (interaction.customId === 'select_antiraid_action') {
+        rCfg.antiRaidAction = interaction.values[0];
+        return renderPanel(interaction, 'antiraid', rGuildId, rCfg);
+      }
+      if (interaction.customId === 'btn_antiraid_unlock') {
+        if (!raidOriginalVerificationLevel.has(rGuildId)) {
+          return interaction.reply({ content: 'ℹ️ ตอนนี้ Verification Level อยู่ในสถานะปกติอยู่แล้ว', ephemeral: true }).catch(() => {});
+        }
+        const original = raidOriginalVerificationLevel.get(rGuildId);
+        raidOriginalVerificationLevel.delete(rGuildId);
+        await interaction.guild.setVerificationLevel(original, `Anti-Raid: ปลดล็อกด้วยตนเองโดย ${interaction.user.tag}`).catch(() => {});
+        return renderPanel(interaction, 'antiraid', rGuildId, rCfg);
+      }
+      if (interaction.customId === 'btn_set_antiraid_config') {
+        const modal = new ModalBuilder().setCustomId('modal_antiraid_config').setTitle('⚙️ ตั้งค่าเกณฑ์ Anti-Raid');
+        const thresholdInput = new TextInputBuilder().setCustomId('threshold_input').setLabel('จำนวนคนขั้นต่ำที่ถือว่าผิดปกติ').setStyle(TextInputStyle.Short).setRequired(false).setValue(String(rCfg.antiRaidJoinThreshold || 10)).setMaxLength(4);
+        const windowInput = new TextInputBuilder().setCustomId('window_input').setLabel('นับภายในกี่วินาที').setStyle(TextInputStyle.Short).setRequired(false).setValue(String(rCfg.antiRaidWindowSeconds || 30)).setMaxLength(4);
+        const minAgeInput = new TextInputBuilder().setCustomId('minage_input').setLabel('อายุบัญชีขั้นต่ำ (วัน)').setStyle(TextInputStyle.Short).setRequired(false).setValue(String(rCfg.antiRaidMinAccountAgeDays || 0)).setMaxLength(4);
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(thresholdInput),
+          new ActionRowBuilder().addComponents(windowInput),
+          new ActionRowBuilder().addComponents(minAgeInput),
+        );
+        return interaction.showModal(modal).catch(() => {});
+      }
+      if (interaction.customId === 'modal_antiraid_config') {
+        const threshold = parseInt(interaction.fields.getTextInputValue('threshold_input').trim(), 10);
+        const windowSeconds = parseInt(interaction.fields.getTextInputValue('window_input').trim(), 10);
+        const minAge = parseInt(interaction.fields.getTextInputValue('minage_input').trim(), 10);
+        if (Number.isFinite(threshold) && threshold >= 3) rCfg.antiRaidJoinThreshold = threshold;
+        if (Number.isFinite(windowSeconds) && windowSeconds >= 5) rCfg.antiRaidWindowSeconds = windowSeconds;
+        if (Number.isFinite(minAge) && minAge >= 0) rCfg.antiRaidMinAccountAgeDays = minAge;
+        return renderPanel(interaction, 'antiraid', rGuildId, rCfg);
+      }
+    }
+
+    // ==========================================
+    // 🌙 18.d หน้าระบบชุมชนบนแผงแอดมิน (ต้องมีสิทธิ์ Manage Server เหมือน /community dream|laws|relic|court setup/on/off เดิม)
+    // ปุ่มเริ่ม/จบ/สุ่มกิจกรรมแจกของยังใช้สิทธิ์ checkHasPermission ตามพฤติกรรมเดิมของ /community giveaway
+    // ==========================================
+    if ((interaction.isButton() && ['btn_toggle_dream', 'btn_toggle_laws', 'btn_toggle_relic', 'btn_toggle_court', 'btn_dream_now'].includes(interaction.customId))
+      || (interaction.isChannelSelectMenu?.() && ['select_dream_channel', 'select_laws_channel'].includes(interaction.customId))) {
+      const cGuildId = interaction.guildId;
+      if (!cGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าระบบนี้ (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const cCfg = getGuildConfig(cGuildId);
+
+      if (interaction.customId === 'btn_toggle_dream') {
+        if (!cCfg.dreamEnabled && !cCfg.dreamChannelId) {
+          return interaction.reply({ content: '❌ ต้องเลือกห้องความฝันก่อนเปิดใช้งาน', ephemeral: true }).catch(() => {});
+        }
+        cCfg.dreamEnabled = !cCfg.dreamEnabled;
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+      if (interaction.customId === 'btn_toggle_laws') {
+        cCfg.lawsEnabled = !cCfg.lawsEnabled;
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+      if (interaction.customId === 'btn_toggle_relic') {
+        if (!cCfg.relicsEnabled && !cCfg.dreamChannelId) {
+          return interaction.reply({ content: '❌ ต้องเลือกห้องความฝันก่อน เพราะของวิเศษหลุดออกมาในห้องเดียวกับความฝัน', ephemeral: true }).catch(() => {});
+        }
+        cCfg.relicsEnabled = !cCfg.relicsEnabled;
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+      if (interaction.customId === 'btn_toggle_court') {
+        cCfg.courtEnabled = !cCfg.courtEnabled;
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+      if (interaction.customId === 'btn_dream_now') {
+        return performDreamNow(interaction, cCfg, cGuildId);
+      }
+      if (interaction.customId === 'select_dream_channel') {
+        cCfg.dreamChannelId = interaction.values[0] || '';
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+      if (interaction.customId === 'select_laws_channel') {
+        cCfg.lawsChannelId = interaction.values[0] || '';
+        return renderPanel(interaction, 'community', cGuildId, cCfg);
+      }
+    }
+
+    if (interaction.isButton() && ['btn_giveaway_start', 'btn_giveaway_end', 'btn_giveaway_reroll'].includes(interaction.customId)) {
+      if (!checkHasPermission(interaction.user.id, interaction.member, interaction.guildId)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์จัดการกิจกรรมนี้', ephemeral: true }).catch(() => {});
+      }
+      if (interaction.customId === 'btn_giveaway_start') {
+        const modal = new ModalBuilder().setCustomId('modal_giveaway_start').setTitle('🎉 เริ่มกิจกรรมแจกของ');
+        const durationInput = new TextInputBuilder().setCustomId('duration_input').setLabel('ระยะเวลา เช่น 30s, 10m, 2h, 1d').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10);
+        const prizeInput = new TextInputBuilder().setCustomId('prize_input').setLabel('ของรางวัล').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200);
+        const winnersInput = new TextInputBuilder().setCustomId('winners_input').setLabel('จำนวนผู้ชนะ (ค่าเริ่มต้น 1)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(3);
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(durationInput),
+          new ActionRowBuilder().addComponents(prizeInput),
+          new ActionRowBuilder().addComponents(winnersInput),
+        );
+        return interaction.showModal(modal).catch(() => {});
+      }
+      if (interaction.customId === 'btn_giveaway_end') {
+        const modal = new ModalBuilder().setCustomId('modal_giveaway_end').setTitle('🏁 จบกิจกรรม');
+        const input = new TextInputBuilder().setCustomId('message_id_input').setLabel('ID ของข้อความกิจกรรม').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25);
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        return interaction.showModal(modal).catch(() => {});
+      }
+      if (interaction.customId === 'btn_giveaway_reroll') {
+        const modal = new ModalBuilder().setCustomId('modal_giveaway_reroll').setTitle('🔄 สุ่มผู้ชนะใหม่');
+        const input = new TextInputBuilder().setCustomId('message_id_input').setLabel('ID ของข้อความกิจกรรม').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25);
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        return interaction.showModal(modal).catch(() => {});
+      }
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_giveaway_start') {
+      const gGuildId = interaction.guildId;
+      if (!gGuildId) return;
+      if (!checkHasPermission(interaction.user.id, interaction.member, gGuildId)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์เริ่มกิจกรรมนี้', ephemeral: true }).catch(() => {});
+      }
+      const durationText = interaction.fields.getTextInputValue('duration_input').trim();
+      const prize = interaction.fields.getTextInputValue('prize_input').trim();
+      const winnersRaw = parseInt(interaction.fields.getTextInputValue('winners_input').trim(), 10);
+      const winnerCount = Number.isFinite(winnersRaw) && winnersRaw > 0 ? Math.min(20, winnersRaw) : 1;
+      return performGiveawayStart(interaction, getGuildConfig(gGuildId), gGuildId, durationText, prize, winnerCount);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_giveaway_end') {
+      const gGuildId = interaction.guildId;
+      if (!gGuildId) return;
+      if (!checkHasPermission(interaction.user.id, interaction.member, gGuildId)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์จบกิจกรรมนี้', ephemeral: true }).catch(() => {});
+      }
+      const messageId = interaction.fields.getTextInputValue('message_id_input').trim();
+      return performGiveawayEnd(interaction, gGuildId, messageId);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'modal_giveaway_reroll') {
+      const gGuildId = interaction.guildId;
+      if (!gGuildId) return;
+      if (!checkHasPermission(interaction.user.id, interaction.member, gGuildId)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์สุ่มผู้ชนะใหม่', ephemeral: true }).catch(() => {});
+      }
+      const messageId = interaction.fields.getTextInputValue('message_id_input').trim();
+      return performGiveawayReroll(interaction, gGuildId, messageId);
+    }
+
+    // ==========================================
+    // 📌 18.e ปุ่มปักหมุด/อัปเดตแผงสมาชิก (ย้ายมาจาก /bot dashboard setup|refresh เดิม — ใช้ปุ่ม dash_publish_/dash_cancel เดิมที่มีอยู่แล้วด้านล่าง)
+    // ==========================================
+    if (interaction.isButton() && interaction.customId === 'btn_dashboard_setup') {
+      const dGuildId = interaction.guildId;
+      if (!dGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์ตั้งค่าแผง Dashboard (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const dCfg = getGuildConfig(dGuildId);
+      const targetChannel = interaction.channel;
+      const { embed, rows } = buildDashboardPayload(interaction.guild, dCfg);
+      const previewEmbed = EmbedBuilder.from(embed)
+        .setFooter({ text: `👀 นี่คือตัวอย่างเท่านั้น (เห็นแค่คุณคนเดียว) — จะโพสต์ลงห้อง #${targetChannel.name} ก็ต่อเมื่อกดยืนยันด้านล่าง` });
+      const confirmRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`dash_publish_${targetChannel.id}`).setLabel('✅ เผยแพร่ถาวรลงห้องนี้').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('dash_cancel').setLabel('❌ ยกเลิก').setStyle(ButtonStyle.Danger),
+      );
+      return interaction.reply({ embeds: [previewEmbed], components: [...rows, confirmRow], ephemeral: true }).catch(() => {});
+    }
+
+    if (interaction.isButton() && interaction.customId === 'btn_dashboard_refresh') {
+      const dGuildId = interaction.guildId;
+      if (!dGuildId) return;
+      if (!checkModPermission(interaction, PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: '❌ คุณไม่มีสิทธิ์อัปเดตแผง Dashboard (ต้องมีสิทธิ์ Manage Server)', ephemeral: true }).catch(() => {});
+      }
+      const dCfg = getGuildConfig(dGuildId);
+      if (!dCfg.dashboardChannelId || !dCfg.dashboardMessageId) {
+        return interaction.reply({ content: '❌ ยังไม่เคยปักหมุดแผงสมาชิกเลย กดปุ่ม "📌 ปักหมุดแผงสมาชิกในห้องนี้" ก่อน', ephemeral: true }).catch(() => {});
+      }
+      const channel = await interaction.guild.channels.fetch(dCfg.dashboardChannelId).catch(() => null);
+      const message = channel ? await channel.messages.fetch(dCfg.dashboardMessageId).catch(() => null) : null;
+      if (!channel || !message) {
+        return interaction.reply({ content: '❌ หาข้อความแผงเดิมไม่เจอ (อาจถูกลบไปแล้ว) กดปักหมุดใหม่อีกครั้ง', ephemeral: true }).catch(() => {});
+      }
+      const { embed, rows } = buildDashboardPayload(interaction.guild, dCfg);
+      await message.edit({ embeds: [embed], components: rows }).catch(() => {});
+      return interaction.reply({ content: `✅ อัปเดตปุ่มบนแผงที่ ${channel} เรียบร้อยแล้ว`, ephemeral: true }).catch(() => {});
+    }
+
     // ---------- ปุ่มยกเลิกการยืนยันรีเซ็ต ----------
     if (interaction.isButton() && interaction.customId === 'btn_reset_cancel') {
       return interaction.update({ content: '❎ ยกเลิกการรีเซ็ตแล้ว', embeds: [], components: [] }).catch(() => {});
@@ -3158,8 +3049,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     // ---------- รายชื่อ customId ทั้งหมดของแผงควบคุม (ต้องมีสิทธิ์เท่านั้น) ----------
+    // ปิดแผง (dismiss) — ใครก็กดได้เสมอไม่ต้องมีสิทธิ์ เพราะแค่ปิดข้อความที่ตัวเองเห็นอยู่ ไม่ใช่การตั้งค่าอะไร
+    if (interaction.isButton() && interaction.customId === 'btn_close_panel') {
+      stopStatsAutoRefresh(interaction.message.id);
+      await interaction.deferUpdate().catch(() => {});
+      return interaction.message.delete().catch(() => {});
+    }
+
     const panelButtonIds = [
-      'nav_main', 'nav_advanced', 'nav_access', 'nav_stats', 'nav_leveling', 'nav_welcome',
+      'nav_main', 'nav_ai', 'nav_advanced', 'nav_access', 'nav_stats', 'nav_leveling', 'nav_welcome',
       'btn_toggle', 'btn_refresh', 'btn_avatar',
       'btn_set_prompt', 'btn_clear_prompt', 'btn_set_api', 'btn_clear_api',
       'btn_set_cooldown', 'btn_toggle_avatar_rotate', 'btn_set_avatar_interval', 'btn_set_status_text', 'btn_toggle_language',
@@ -3170,7 +3068,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       'btn_toggle_leveling', 'btn_set_leveling_xp', 'btn_set_leveling_cooldown', 'btn_set_role_rewards', 'btn_reset_levels',
       'btn_toggle_imagegen',
       'btn_toggle_welcome', 'btn_set_welcome_message', 'btn_toggle_leave', 'btn_set_leave_message',
-      'btn_close_panel',
     ];
     const panelSelectIds = [
       'select_mode', 'select_roles', 'select_channels', 'select_log_channel', 'select_blacklist_users', 'select_whitelist_users',
@@ -3356,12 +3253,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.followUp({ content: r.success ? `✅ เปลี่ยนรูปแล้ว (${r.source})` : '❌ เปลี่ยนรูปไม่สำเร็จ ลองใหม่อีกครั้ง', ephemeral: true }).catch(() => {});
     }
 
-    if (interaction.isButton() && interaction.customId === 'btn_close_panel') {
-      stopStatsAutoRefresh(interaction.message.id);
-      await interaction.deferUpdate().catch(() => {});
-      return interaction.message.delete().catch(() => {});
-    }
-
     if (interaction.isButton() && interaction.customId === 'btn_export_config') {
       const buffer = Buffer.from(JSON.stringify(cfg, null, 2), 'utf-8');
       return interaction.reply({
@@ -3421,6 +3312,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       cfg.customApiModel = '';
       renderPage = 'main';
     } else if (interaction.isButton() && interaction.customId === 'nav_main') {
+      renderPage = 'hub';
+    } else if (interaction.isButton() && interaction.customId === 'nav_ai') {
       renderPage = 'main';
     } else if (interaction.isButton() && interaction.customId === 'nav_advanced') {
       renderPage = 'advanced';
